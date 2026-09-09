@@ -204,23 +204,59 @@ export class WorldTextures {
     });
   }
 
-  /** The treadmill belt: chevrons that scroll toward the runner. */
-  belt(color: string, dark: string): Texture {
-    return this.cached(`belt:${color}:${dark}`, () => {
+  /**
+   * The treadmill belt: chevrons that scroll along the belt's length.
+   *
+   * They point along U, not V. The belt's top face maps U to its long axis, so
+   * a chevron drawn pointing "up" the canvas would run ACROSS the machine.
+   */
+  /**
+   * Ice: a pale sheet with a few brighter cracks.
+   *
+   * Deliberately low-contrast. The stage's warning is the handling, not the
+   * texture, and a busy floor under a mount that is already sliding is noise.
+   */
+  ice(color: string, bright: string): Texture {
+    return this.cached(`ice:${color}:${bright}`, () => {
       const size = 64;
       const ctx = context(size);
       ctx.fillStyle = color;
       ctx.fillRect(0, 0, size, size);
-      ctx.fillStyle = dark;
+      ctx.strokeStyle = bright;
+      ctx.lineWidth = 2;
+      const cracks: readonly (readonly number[])[] = [
+        [6, 10, 26, 22, 18, 44],
+        [40, 4, 52, 26, 38, 58],
+        [2, 52, 22, 60],
+      ];
+      for (const crack of cracks) {
+        ctx.beginPath();
+        ctx.moveTo(crack[0] as number, crack[1] as number);
+        for (let i = 2; i < crack.length; i += 2) {
+          ctx.lineTo(crack[i] as number, crack[i + 1] as number);
+        }
+        ctx.stroke();
+      }
+      return ctx.canvas;
+    });
+  }
+
+  belt(base: string, mark: string): Texture {
+    return this.cached(`belt:${base}:${mark}`, () => {
+      const size = 64;
+      const ctx = context(size);
+      ctx.fillStyle = base;
+      ctx.fillRect(0, 0, size, size);
+      ctx.fillStyle = mark;
       for (let i = 0; i < 2; i += 1) {
         const base = i * 32;
         ctx.beginPath();
-        ctx.moveTo(4, base + 22);
-        ctx.lineTo(size / 2, base + 4);
-        ctx.lineTo(size - 4, base + 22);
-        ctx.lineTo(size - 4, base + 28);
-        ctx.lineTo(size / 2, base + 10);
-        ctx.lineTo(4, base + 28);
+        ctx.moveTo(base + 22, 4);
+        ctx.lineTo(base + 4, size / 2);
+        ctx.lineTo(base + 22, size - 4);
+        ctx.lineTo(base + 28, size - 4);
+        ctx.lineTo(base + 10, size / 2);
+        ctx.lineTo(base + 28, 4);
         ctx.closePath();
         ctx.fill();
       }

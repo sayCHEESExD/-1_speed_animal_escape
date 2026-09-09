@@ -70,10 +70,17 @@ const showOfflineNotice = (error: unknown): void => {
   logger.error(SCOPE, `offline: ${detail}`);
   if (bootStatus) {
     bootStatus.className = 'err';
-    bootStatus.textContent =
-      `Not connected to the game server (${clientConfig.serverUrl}).\n` +
-      'Playing offline: Speed, levels, Wins and animals are server-owned and ' +
-      'will not progress. Reload to try again.';
+    // An empty server URL is not a network failure, it is a build that was
+    // never told where the server is - which on a static host is the likeliest
+    // cause by far, and the one a "cannot connect" message sends people
+    // looking in entirely the wrong place.
+    bootStatus.textContent = clientConfig.serverUrl
+      ? `Not connected to the game server (${clientConfig.serverUrl}).\n` +
+        'Playing offline: Speed, levels, Wins and animals are server-owned and ' +
+        'will not progress. Reload to try again.'
+      : 'This build has no game server configured (VITE_SERVER_URL was not set ' +
+        'when it was built).\nPlaying offline: Speed, levels, Wins and animals ' +
+        'are server-owned and will not progress.';
   }
   boot?.classList.add('notice');
 };

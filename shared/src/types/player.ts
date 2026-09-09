@@ -63,7 +63,7 @@ export interface PlayerMotionState {
 /** Server-authoritative progression snapshot. */
 export interface PlayerProgression {
   level: number;
-  /** Completed reboots. Drives the level cap and the Speed multiplier. */
+  /** Completed rebirths. Drives the level cap and the Speed multiplier. */
   rebirths: number;
   /** Stage wins collected. Awarded by the server only. */
   wins: number;

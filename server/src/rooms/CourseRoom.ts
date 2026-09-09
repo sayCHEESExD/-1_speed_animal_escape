@@ -1,6 +1,7 @@
-import { Client, Room } from '@colyseus/core';
+import { Client, Room, ServerError } from '@colyseus/core';
 import {
   AnimalAnimationState,
+  MAX_PLAYERS_PER_ROOM,
   MessageType,
   SPAWN_POSITION,
   SPAWN_ROTATION_Y,
@@ -18,8 +19,9 @@ import {
 import { serverConfig } from '../config/serverConfig.js';
 import { MovementService } from '../movement/MovementService.js';
 import { AnimalService } from '../progression/AnimalService.js';
+import { leaderboardService } from '../progression/LeaderboardService.js';
 import { profileStore } from '../progression/ProfileStore.js';
-import { RebootService } from '../progression/RebootService.js';
+import { RebirthService } from '../progression/RebirthService.js';
 import { SpeedService } from '../progression/SpeedService.js';
 import { StageService } from '../progression/StageService.js';
 import { TrailService } from '../progression/TrailService.js';
@@ -52,13 +54,21 @@ interface JoinOptions {
  * writes itself.
  */
 export class CourseRoom extends Room<CourseState> {
-  override maxClients = 24;
+  /**
+   * Capacity, and the matchmaker's cue to open another room.
+   *
+   * Colyseus locks a room the moment this is reached and `joinOrCreate` sends
+   * the next player to a fresh one, so a full server routes rather than
+   * refuses. The figure is shared with the client so the two can never hold
+   * different ideas of how big a room is.
+   */
+  override maxClients = MAX_PLAYERS_PER_ROOM;
 
   private readonly movement = new MovementService();
   private readonly speeds = new SpeedService();
   private readonly stages = new StageService();
   private readonly animals = new AnimalService();
-  private readonly reboots = new RebootService();
+  private readonly rebirths = new RebirthService();
   private readonly trails = new TrailService();
   private readonly elephant = new ElephantService();
 
@@ -86,7 +96,7 @@ export class CourseRoom extends Room<CourseState> {
     this.onMessage(MessageType.RequestRespawn, (client) =>
       this.respawn(client, 'manual'),
     );
-    this.onMessage(MessageType.Reboot, (client) => this.onReboot(client));
+    this.onMessage(MessageType.Rebirth, (client) => this.onRebirth(client));
     this.onMessage(MessageType.BuyTrail, (client, message: BuyTrailMessage) =>
       this.onBuyTrail(client, message),
     );
@@ -101,7 +111,36 @@ export class CourseRoom extends Room<CourseState> {
       serverConfig.patchRateMs,
     );
 
-    logger.info(SCOPE, `room ${this.roomId} created`);
+    logger.info(
+      SCOPE,
+      `room ${this.roomId} created (capacity ${MAX_PLAYERS_PER_ROOM})`,
+    );
+  }
+
+  /**
+   * The capacity check that does not depend on the matchmaker.
+   *
+   * `maxClients` is enforced when a seat is RESERVED, which is the right place
+   * and covers every normal join. This is the second line: a seat reservation
+   * that is consumed late, a direct `joinById` into a room that filled while
+   * the request was in flight, or any future path that reaches a room without
+   * going through matchmaking would all arrive here. Refusing at the door
+   * costs one comparison and makes the limit a property of the ROOM rather
+   * than of the route taken to it.
+   *
+   * Nothing about this is client-side: a client cannot decline to call it and
+   * cannot see the number it is compared against.
+   */
+  override onAuth(): boolean {
+    if (this.clients.length >= MAX_PLAYERS_PER_ROOM) {
+      logger.warn(
+        SCOPE,
+        `refused a join: room ${this.roomId} is full ` +
+          `(${this.clients.length}/${MAX_PLAYERS_PER_ROOM})`,
+      );
+      throw new ServerError(4103, 'room is full');
+    }
+    return true;
   }
 
   override onJoin(client: Client, options: JoinOptions = {}): void {
@@ -123,7 +162,7 @@ export class CourseRoom extends Room<CourseState> {
     this.trails.initialise(player);
     this.speeds.initialise(player);
     this.stages.initialise(client.sessionId);
-    this.reboots.sync(player);
+    this.rebirths.sync(player);
 
     // `initialise` reset the level to 1 for a fresh profile; a restored one
     // has to be re-derived from the Speed it came back with.
@@ -131,7 +170,7 @@ export class CourseRoom extends Room<CourseState> {
 
     // Put the player at spawn through the SAME path a respawn takes, so there
     // is one definition of "where a player belongs" rather than two.
-    this.placeAt(client, player, SPAWN_POSITION.z, 'join');
+    this.placeAt(client, player, 'join');
 
     logger.info(
       SCOPE,
@@ -209,7 +248,7 @@ export class CourseRoom extends Room<CourseState> {
     // loop the win pad's "Return" label promises, and it is also what makes a
     // second payment impossible: the pad is hundreds of units behind them
     // before another request could arrive.
-    this.placeAt(client, player, SPAWN_POSITION.z, 'stage');
+    this.placeAt(client, player, 'stage');
 
     this.persist(client.sessionId, player);
     logger.info(
@@ -236,22 +275,22 @@ export class CourseRoom extends Room<CourseState> {
     );
   }
 
-  /** A reboot request. The server alone decides whether it is allowed. */
-  private onReboot(client: Client): void {
+  /** A rebirth request. The server alone decides whether it is allowed. */
+  private onRebirth(client: Client): void {
     const player = this.state.players.get(client.sessionId);
     if (!player) return;
 
-    const result = this.reboots.reboot(player, this.speeds);
+    const result = this.rebirths.rebirth(player, this.speeds);
     if (!result.ok) return;
 
-    // A reboot resets the RUN as well as the curve: the player's level - and
+    // A rebirth resets the RUN as well as the curve: the player's level - and
     // therefore their speed - is no longer what carried them to wherever they
     // were standing, so they start again from the arena.
-    this.placeAt(client, player, SPAWN_POSITION.z, 'reboot');
+    this.placeAt(client, player, 'rebirth');
     this.persist(client.sessionId, player);
     logger.info(
       SCOPE,
-      `${client.sessionId} rebooted to ${result.reboots} (x${result.multiplier})`,
+      `${client.sessionId} rebirthed to ${result.rebirths} (x${result.multiplier})`,
     );
   }
 
@@ -294,6 +333,12 @@ export class CourseRoom extends Room<CourseState> {
     // below is decided against that same position.
     this.elephant.update(this.state.elephant, delta, this.state.players.values());
 
+    // The boards on the spawn wall. Rebuilt on their own slow timer inside the
+    // service - a leaderboard is not a thing anyone reads twenty times a
+    // second, and sorting every profile at tick rate to feed a sign would be
+    // the most expensive thing in this room.
+    leaderboardService.update(delta, this.state.leaderboard, this.state.players, this.playerIds);
+
     for (const [sessionId, player] of this.state.players) {
       if (!player.ready) continue;
 
@@ -322,44 +367,45 @@ export class CourseRoom extends Room<CourseState> {
     }
   }
 
-  /** Put a player back at their checkpoint and tell them where that is. */
+  /** Put a player back at the starting arena and tell them so. */
   private respawn(client: Client, reason: RespawnReason): void {
     const player = this.state.players.get(client.sessionId);
     if (!player) return;
-    this.placeAt(client, player, this.stages.respawnZFor(player.z), reason);
+    this.placeAt(client, player, reason);
   }
 
   /**
-   * THE one way a player is placed.
+   * THE one way a player is placed, and there is exactly ONE destination.
+   *
+   * `SPAWN_POSITION` - the starting arena - whatever the cause and whatever
+   * stage the player was on. There are no checkpoints in this game and no
+   * second place a player can arrive at, which is why this takes no position:
+   * a placement that could land somewhere else is the bug the parameter used
+   * to allow.
    *
    * Teleports the simulation, drops the Speed baseline (or the teleport itself
    * would be credited as distance travelled), and sends the authoritative
    * transform.
    */
-  private placeAt(
-    client: Client,
-    player: PlayerState,
-    z: number,
-    reason: RespawnReason,
-  ): void {
+  private placeAt(client: Client, player: PlayerState, reason: RespawnReason): void {
     this.movement.teleport(
       client.sessionId,
       player,
       SPAWN_POSITION.x,
       SPAWN_POSITION.y,
-      z,
+      SPAWN_POSITION.z,
       SPAWN_ROTATION_Y,
     );
     this.speeds.reset(client.sessionId, player);
     player.animation = AnimalAnimationState.Idle;
-    // A death plays the fall-over. Arriving, banking a stage and rebooting are
+    // A death plays the fall-over. Arriving, banking a stage and being reborn are
     // all PLACEMENTS rather than deaths, so none of them bumps the counter.
     if (reason === 'fell' || reason === 'hazard') player.deathCount += 1;
 
     const message: RespawnMessage = {
       x: SPAWN_POSITION.x,
       y: SPAWN_POSITION.y,
-      z,
+      z: SPAWN_POSITION.z,
       rotationY: SPAWN_ROTATION_Y,
       reason,
     };
@@ -369,7 +415,7 @@ export class CourseRoom extends Room<CourseState> {
     // back at the arena and cannot say why is the hardest bug in this game to
     // diagnose from the outside, and one line here answers it.
     if (reason !== 'join') {
-      logger.info(SCOPE, `place ${client.sessionId} -> z=${z.toFixed(0)} (${reason})`);
+      logger.info(SCOPE, `place ${client.sessionId} -> spawn (${reason})`);
     }
   }
 

@@ -10,7 +10,13 @@ import {
 import { Client, getStateCallbacks, type Room } from 'colyseus.js';
 import { clientConfig } from '../config/clientConfig.js';
 import { logger } from '../util/logger.js';
-import type { ConnectionStatus, NetCourseState, NetPlayerState } from './netTypes.js';
+import type {
+  ConnectionStatus,
+  LeaderboardSnapshot,
+  NetCourseState,
+  NetLeaderEntry,
+  NetPlayerState,
+} from './netTypes.js';
 
 const SCOPE = 'NetworkClient';
 
@@ -70,14 +76,23 @@ export interface NetworkHandlers {
  * transport or the room name only touches this file and @animal/shared.
  */
 export class NetworkClient {
-  private readonly client: Client;
   private readonly handlers: NetworkHandlers;
+
+  /**
+   * Built on CONNECT, not on construction.
+   *
+   * Colyseus parses the endpoint in its own constructor, so building this
+   * eagerly meant a build with no server configured threw while the `Game` was
+   * still being assembled - long before anything could report why. The whole
+   * game then failed to start with "Invalid URL", which says nothing at all
+   * about the actual cause: nobody set `VITE_SERVER_URL`.
+   */
+  private client: Client | null = null;
 
   private room: Room<NetCourseState> | null = null;
   private status: ConnectionStatus = 'idle';
 
   constructor(handlers: NetworkHandlers = {}) {
-    this.client = new Client(clientConfig.serverUrl);
     this.handlers = handlers;
   }
 
@@ -101,9 +116,21 @@ export class NetworkClient {
   }
 
   async connect(): Promise<void> {
+    // No endpoint is a CONFIGURATION fault, not a network one, and it is
+    // reported as one before a socket is ever attempted. On a static host this
+    // is far and away the likeliest thing to be wrong.
+    if (!clientConfig.serverUrl) {
+      this.setStatus('error');
+      throw new Error(
+        'No game server is configured. Set VITE_SERVER_URL to the Colyseus ' +
+          'endpoint (for example wss://your-server-host) and rebuild.',
+      );
+    }
+
     this.setStatus('connecting');
     logger.info(SCOPE, `joining "${ROOM_NAME}" at ${clientConfig.serverUrl}`);
 
+    this.client ??= new Client(clientConfig.serverUrl);
     const playerId = resolvePlayerId();
     const attempts = JOIN_BACKOFF_MS.length + 1;
 
@@ -166,13 +193,13 @@ export class NetworkClient {
   }
 
   /**
-   * Ask to reboot.
+   * Ask to rebirth.
    *
-   * Carries nothing: the server knows the level and the reboot count and is
+   * Carries nothing: the server knows the level and the rebirth count and is
    * the only thing allowed to decide whether the requirement is met.
    */
-  requestReboot(): void {
-    this.room?.send(MessageType.Reboot, {});
+  requestRebirth(): void {
+    this.room?.send(MessageType.Rebirth, {});
   }
 
   /** Ask to buy a trail. The server decides and replicates the result. */
@@ -194,7 +221,30 @@ export class NetworkClient {
   }
 
   /**
-   * Ask to be put back at the last checkpoint.
+   * The three leaderboards, as plain arrays.
+   *
+   * COPIED out of the schema rather than handed over live. A live schema
+   * reference reads as whatever it holds at the moment it is looked at, so a
+   * renderer that kept one would silently start showing a later board than the
+   * one it decided to redraw for - which is exactly the class of bug that
+   * makes a display look like it is missing updates.
+   */
+  get leaderboard(): LeaderboardSnapshot | null {
+    const board = this.room?.state?.leaderboard;
+    if (!board) return null;
+    const copy = (rows: ArrayLike<NetLeaderEntry>): NetLeaderEntry[] => {
+      const out: NetLeaderEntry[] = [];
+      for (let i = 0; i < rows.length; i += 1) {
+        const row = rows[i];
+        if (row) out.push({ handle: row.handle, value: row.value });
+      }
+      return out;
+    };
+    return { wins: copy(board.wins), speed: copy(board.speed), rebirths: copy(board.rebirths) };
+  }
+
+  /**
+   * Ask to be put back at the starting arena.
    *
    * A request with no payload. The server decides where a respawn lands and
    * replies with the authoritative `Respawn`, so this can no more move a

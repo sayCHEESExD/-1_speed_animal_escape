@@ -14,7 +14,7 @@ export const anyPanelOpen = (): boolean => openCount > 0;
 /**
  * A modal panel: a titled box over a dimmed backdrop.
  *
- * Shared by the reboot confirmation and the trail shop, so the two cannot
+ * Shared by the rebirth confirmation and the trail shop, so the two cannot
  * drift apart visually and the open/close accounting exists once.
  */
 export class Panel {

@@ -17,14 +17,21 @@ import {
   COURSE_HAZARDS,
   COURSE_SOLIDS,
   MOVEMENT,
+  QUICKSAND,
   SINKING_SOLIDS,
+  SPAWN_POSITION,
   STAGES,
   TRAINING,
+  RUINS_ARENA,
   TREADMILL_BELT_Y,
+  WIDE_AREAS,
+  corridorHalfWidthAt,
+  hazardReachX,
+  totalSpeedToReach,
   resolveMovementProfile,
   sinkingOffsetAt,
   treadmillAt,
-  treadmillX,
+  treadmillZ,
 } from '../shared/dist/index.js';
 
 let failures = 0;
@@ -49,7 +56,11 @@ const pass = (message) => console.log(`  ok    ${message}`);
  * exists, so counting it would mask a hole underneath it.
  */
 const walkableSpans = () => {
-  const spans = COURSE_SOLIDS.filter((solid) => solid.kind !== 'boost')
+  // Sinking platforms count. They are floor for most of every cycle - the
+  // vanishing bridge is made of nothing else - and leaving them out reported
+  // that whole stage as one 239-unit hole no player could jump.
+  const spans = [...COURSE_SOLIDS, ...SINKING_SOLIDS]
+    .filter((solid) => solid.kind !== 'boost')
     .map((solid) => [solid.minZ, solid.maxZ])
     .sort((a, b) => a[0] - b[0]);
 
@@ -64,7 +75,7 @@ const walkableSpans = () => {
 
 /** Z ranges where floor exists but not on the centre line - a plank crossing. */
 const narrowCrossings = () => {
-  const centre = COURSE_SOLIDS.filter(
+  const centre = [...COURSE_SOLIDS, ...SINKING_SOLIDS].filter(
     (s) => s.kind !== 'boost' && s.minX <= 0 && s.maxX >= 0,
   );
   const covered = (z) => centre.some((s) => z >= s.minZ && z <= s.maxZ);
@@ -197,6 +208,97 @@ for (let i = 0; i < Math.min(STAGES.length, EXPECTED_REWARDS.length); i += 1) {
 }
 if (failures === 0) pass(`rewards are ${EXPECTED_REWARDS.join(', ')}`);
 
+// Past the authored head, the only rules are that the curve keeps climbing and
+// never pays less for a harder stage. A later stage worth fewer Wins than an
+// earlier one would make the whole ladder something to farm backwards.
+{
+  let broken = 0;
+  for (let i = 1; i < STAGES.length; i += 1) {
+    if (STAGES[i].winReward <= STAGES[i - 1].winReward) {
+      broken += 1;
+      fail(
+        `stage ${STAGES[i].index} pays ${STAGES[i].winReward}, ` +
+          `no more than stage ${STAGES[i - 1].index}`,
+      );
+    }
+  }
+  if (broken === 0) {
+    pass(
+      `${STAGES.length} rewards, strictly increasing to ` +
+        `${STAGES[STAGES.length - 1].winReward}`,
+    );
+  }
+}
+
+console.log('respawn');
+{
+  /*
+   * There is ONE place a player can arrive, and no stage may carry another.
+   *
+   * The checkpoint system is gone: dying anywhere returns the player to the
+   * starting arena. This checks the shape of that rather than the behaviour -
+   * a stage that carried a respawn Z again would be the first step back
+   * toward per-stage respawns, and it would be added here long before anyone
+   * noticed it in play.
+   */
+  const strays = STAGES.filter((stage) =>
+    Object.keys(stage).some((key) => /checkpoint|respawn/i.test(key)),
+  );
+  if (strays.length > 0) {
+    fail(`${strays.length} stage(s) carry their own respawn point`);
+  } else if (SPAWN_POSITION.z > COURSE.lobbyEndZ || SPAWN_POSITION.z < COURSE.lobbyStartZ) {
+    fail(`the spawn at z=${SPAWN_POSITION.z} is not inside the starting arena`);
+  } else {
+    pass(`one spawn, at z=${SPAWN_POSITION.z}, and no stage defines another`);
+  }
+}
+
+console.log('difficulty ladder');
+{
+  /*
+   * The recommended level has to climb, and it has to be REACHABLE.
+   *
+   * The level cap is 25 per rebirth, so a stage recommending level 130 is
+   * asking for five of them. That is a legitimate ask at the end of a
+   * twenty-stage ladder and an absurd one in the middle, which is why this
+   * prints the rebirths each stage implies rather than merely checking the
+   * numbers go up.
+   */
+  let broken = 0;
+  for (let i = 1; i < STAGES.length; i += 1) {
+    if (STAGES[i].recommendedLevel <= STAGES[i - 1].recommendedLevel) {
+      broken += 1;
+      fail(`stage ${STAGES[i].index} recommends no more level than stage ${STAGES[i].index - 1}`);
+    }
+    if (STAGES[i].recommendedSpeed <= STAGES[i - 1].recommendedSpeed) {
+      broken += 1;
+      fail(`stage ${STAGES[i].index} recommends no more Speed than stage ${STAGES[i].index - 1}`);
+    }
+  }
+
+  // The advertised Speed must be the Speed that level actually costs, or the
+  // gate is telling the player two different things.
+  for (const stage of STAGES) {
+    const owed = totalSpeedToReach(stage.recommendedLevel);
+    if (Math.abs(stage.recommendedSpeed - owed) > 1) {
+      broken += 1;
+      fail(
+        `stage ${stage.index} advertises ${stage.recommendedSpeed} Speed for ` +
+          `level ${stage.recommendedLevel}, which actually costs ${owed}`,
+      );
+    }
+  }
+
+  const last = STAGES[STAGES.length - 1];
+  const rebirthsNeeded = Math.max(0, Math.ceil(last.recommendedLevel / 25) - 1);
+  if (broken === 0) {
+    pass(
+      `levels ${STAGES[0].recommendedLevel}-${last.recommendedLevel} rising every stage, ` +
+        `the last needing ${rebirthsNeeded} rebirth(s)`,
+    );
+  }
+}
+
 console.log('hazards');
 for (const hazard of COURSE_HAZARDS) {
   if (hazard.kind === 'roller') {
@@ -208,30 +310,78 @@ for (const hazard of COURSE_HAZARDS) {
     }
     continue;
   }
-  const reach = Math.abs(hazard.x) + hazard.sweep + hazard.radius;
-  if (reach > COURSE.halfWidth + 0.5) {
-    fail(`sweeper at z=${hazard.z} reaches ${reach.toFixed(1)}, past the ${COURSE.halfWidth} wall`);
+  // Sweeper, spinner and tornado all reach `|x| + sweep + radius` at the far
+  // side of their travel - a sweep and an orbit have the same extreme. What
+  // they must fit inside is the corridor AT THEIR OWN Z, not the nominal
+  // width: half the later stages are arenas, and checking them against 32
+  // would condemn every arm that was correctly built for a wider room.
+  const wall = corridorHalfWidthAt(hazard.z);
+  const reach = hazardReachX(hazard);
+  if (reach > wall + 0.5) {
+    fail(`${hazard.kind} at z=${hazard.z.toFixed(0)} reaches ${reach.toFixed(1)}, past the ${wall} wall`);
   }
 }
 pass(`${COURSE_HAZARDS.length} hazards, all inside the corridor`);
 
 console.log('sinking platforms');
 {
-  // Every row of stage 3 must keep at least one platform the player can rely
-  // on, or the section becomes a coin flip at some phase of the cycle.
+  /*
+   * Every row must be crossable AT EVERY MOMENT.
+   *
+   * The original rule was "each row keeps one fixed platform", which is how
+   * the sands are built but not how the vanishing bridge is: there, all three
+   * lanes sink and the phases are a third of a cycle apart, so one is always
+   * up. A rule that only knew about fixed platforms called that unplayable
+   * while it is in fact the whole design.
+   *
+   * So the check is the real question instead of a proxy for it: sample the
+   * cycle and require that at some usable height, something in the row is
+   * standable at every sampled instant.
+   */
   const rows = new Map();
+  const rowKey = (z) => Math.round(z / 4) * 4;
+
   for (const solid of COURSE_SOLIDS) {
-    if (solid.kind !== 'plank' || solid.stage !== 2) continue;
-    const z = Math.round((solid.minZ + solid.maxZ) / 2);
-    rows.set(z, (rows.get(z) ?? 0) + 1);
+    // Anything solid and roughly at floor level counts as a fixed platform.
+    if (solid.kind === 'boost' || solid.maxY > COURSE.floorY + 0.3) continue;
+    if (solid.maxY < COURSE.floorY - 2) continue;
+    const key = `${solid.stage}:${rowKey((solid.minZ + solid.maxZ) / 2)}`;
+    if (!rows.has(key)) rows.set(key, { fixed: 0, sinking: [] });
+    rows.get(key).fixed += 1;
   }
-  const sinkingRows = new Set();
   for (const platform of SINKING_SOLIDS) {
-    sinkingRows.add(Math.round((platform.minZ + platform.maxZ) / 2));
+    const key = `${platform.stage}:${rowKey((platform.minZ + platform.maxZ) / 2)}`;
+    if (!rows.has(key)) rows.set(key, { fixed: 0, sinking: [] });
+    rows.get(key).sinking.push(platform);
   }
+
+  // How far a platform may have dropped and still be ridden onto. The mount
+  // steps up `stepHeight`, so a platform lower than that from its neighbours
+  // is gone as far as the player is concerned.
+  const STANDABLE = MOVEMENT.stepHeight;
   let unsafe = 0;
-  for (const z of sinkingRows) if (!rows.has(z)) unsafe += 1;
-  if (unsafe > 0) fail(`${unsafe} sinking row(s) have no fixed platform at all`);
+  let sampled = 0;
+  for (const [key, row] of rows) {
+    if (row.sinking.length === 0) continue;
+    if (row.fixed > 0) continue;
+    sampled += 1;
+    const cycle = Math.max(...row.sinking.map((s) => s.cycle));
+    let worst = null;
+    for (let i = 0; i < 120; i += 1) {
+      const t = (cycle * i) / 120;
+      const up = row.sinking.filter(
+        (s) => sinkingOffsetAt(s, t).drop <= STANDABLE,
+      ).length;
+      if (worst === null || up < worst) worst = up;
+    }
+    if (worst === 0) {
+      unsafe += 1;
+      fail(`sinking row ${key} has no platform up at some point in its cycle`);
+    }
+  }
+  if (unsafe === 0) {
+    pass(`${sampled} all-sinking row(s) keep a platform up through the whole cycle`);
+  }
   else pass(`${SINKING_SOLIDS.length} sinking platforms, every row keeps a fixed one`);
 
   // And a platform must actually come back.
@@ -256,7 +406,7 @@ console.log('training');
   // Three belts, and each must be detectable from its own centre.
   let found = 0;
   for (let i = 1; i <= TRAINING.count; i += 1) {
-    if (treadmillAt(treadmillX(i), TREADMILL_BELT_Y, TRAINING.centerZ) === i) found += 1;
+    if (treadmillAt(TRAINING.centerX, TREADMILL_BELT_Y, treadmillZ(i)) === i) found += 1;
   }
   if (found !== TRAINING.count) fail(`only ${found}/${TRAINING.count} belts detect`);
   else pass(`${TRAINING.count} identical belts, all detected from their centres`);
@@ -264,6 +414,66 @@ console.log('training');
   // Standing off the deck must detect nothing.
   if (treadmillAt(0, 0, 0) !== 0) fail('a belt is detected in the middle of the arena');
   else pass('no belt is detected away from the training deck');
+}
+
+console.log('wide areas');
+{
+  // The ruins have to be an ARENA, not another lane - comparable to the
+  // starting arena rather than to the corridor.
+  const arenaHalf = RUINS_ARENA.halfWidth;
+  if (arenaHalf < COURSE.lobbyHalfWidth * 0.8) {
+    fail(`ruins half-width ${arenaHalf} is not comparable to the arena's ${COURSE.lobbyHalfWidth}`);
+  } else {
+    pass(`ruins arena is ${arenaHalf * 2} x ${(RUINS_ARENA.maxZ - RUINS_ARENA.minZ).toFixed(0)}`);
+  }
+
+  // Every wide area needs floor all the way to its own boundary, or the clamp
+  // holds the player over open air.
+  for (const area of WIDE_AREAS) {
+    const midZ = (area.minZ + area.maxZ) / 2;
+    const edge = area.halfWidth - 0.5;
+    const covered = COURSE_SOLIDS.some(
+      (s) =>
+        s.kind !== 'boost' &&
+        s.maxY <= COURSE.floorY + 0.2 &&
+        edge >= s.minX &&
+        edge <= s.maxX &&
+        midZ >= s.minZ &&
+        midZ <= s.maxZ,
+    );
+    /*
+     * A wide area's edge must be somewhere the player can BE: either floor, or
+     * a killing surface that was put there on purpose. The lava crossing and
+     * the cliffs are pits from wall to wall by design, and being clamped into
+     * one of those is a death the stage intends - what this rule exists to
+     * catch is a clamp holding someone over nothing at all.
+     */
+    const drowned = QUICKSAND.some(
+      (q) => edge >= q.minX && edge <= q.maxX && midZ >= q.minZ && midZ <= q.maxZ,
+    );
+    if (!covered && !drowned) {
+      fail(`wide area at z=${midZ.toFixed(0)} has neither floor nor a pit at its edge`);
+    }
+    if (Math.abs(corridorHalfWidthAt(midZ) - area.halfWidth) > 0.01) {
+      fail(`the boundary at z=${midZ.toFixed(0)} disagrees with its own width`);
+    }
+  }
+  pass(`${WIDE_AREAS.length} wide areas, floored to their own boundary`);
+}
+
+console.log('corridor width');
+{
+  // Everything past the arena runs at the corridor width unless a wide area
+  // says otherwise, and obstacles are laid out as fractions of it.
+  pass(`corridor is ${COURSE.halfWidth * 2} wide`);
+  const strays = COURSE_SOLIDS.filter(
+    (s) => s.stage >= 0 && (s.minX < -COURSE.halfWidth - 0.01 || s.maxX > COURSE.halfWidth + 0.01),
+  ).filter((s) => {
+    const midZ = (s.minZ + s.maxZ) / 2;
+    return corridorHalfWidthAt(midZ) <= COURSE.halfWidth + 0.01;
+  });
+  if (strays.length > 0) fail(`${strays.length} stage solid(s) stick out past the corridor wall`);
+  else pass('no stage geometry pokes through a wall');
 }
 
 console.log('');

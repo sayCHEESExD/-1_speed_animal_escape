@@ -25,6 +25,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { PALETTE, SCENERY } from '../config/worldVisuals.js';
 import { AnimalStands } from './AnimalStands.js';
 import { CanvasSign } from './CanvasSign.js';
+import { Scoreboard } from './Scoreboard.js';
 import { Elephant } from './Elephant.js';
 import { Hazards } from './Hazards.js';
 import { SinkingPlatforms } from './SinkingPlatforms.js';
@@ -61,6 +62,8 @@ export class CourseWorld {
   readonly training: TrainingArea;
   readonly sinking: SinkingPlatforms;
   readonly elephant: Elephant;
+  /** The three leaderboards on the back wall of the spawn arena. */
+  readonly scoreboard: Scoreboard;
   readonly sky: Sky;
 
   private readonly textures = new WorldTextures();
@@ -91,12 +94,15 @@ export class CourseWorld {
     this.root.add(this.signs.root);
 
     this.training = new TrainingArea(
-      this.textures.belt(hex(PALETTE.treadmillBelt), '#1d7a2b'),
+      this.textures.belt(hex(PALETTE.treadmillBelt), '#5fe06f'),
     );
     this.root.add(this.training.root);
 
     this.elephant = new Elephant();
     this.root.add(this.elephant.root);
+
+    this.scoreboard = new Scoreboard();
+    this.root.add(this.scoreboard.root);
 
     this.sky = new Sky();
     this.root.add(this.sky.root);
@@ -130,6 +136,7 @@ export class CourseWorld {
     this.signs.dispose();
     this.training.dispose();
     this.elephant.dispose();
+    this.scoreboard.dispose();
     this.sky.dispose();
     this.root.removeFromParent();
   }
@@ -196,10 +203,19 @@ export class CourseWorld {
     this.addMerged(skirts, this.solidMaterial(PALETTE.pitFloor), true);
   }
 
-  /** The quicksand surfaces of stages 3 and 4. */
+  /**
+   * The bottom of every pit, in whatever the pit is made of.
+   *
+   * Sand, lava and water kill by exactly the same rule and are drawn by
+   * exactly the same box - grouped by material so the three of them still cost
+   * three meshes rather than one per pit. The mechanic is shared on purpose;
+   * only the look is not, which is what lets three stages use it without
+   * reading as the same stage three times.
+   */
   private buildQuicksand(): void {
     if (QUICKSAND.length === 0) return;
-    const parts: BufferGeometry[] = [];
+
+    const byMaterial = new Map<string, BufferGeometry[]>();
     for (const pit of QUICKSAND) {
       const geometry = texturedBox(
         pit.maxX - pit.minX,
@@ -212,13 +228,36 @@ export class CourseWorld {
         pit.surfaceY - 0.75,
         (pit.minZ + pit.maxZ) / 2,
       );
-      parts.push(geometry);
+      const list = byMaterial.get(pit.surface);
+      if (list) list.push(geometry);
+      else byMaterial.set(pit.surface, [geometry]);
     }
-    this.addMerged(
-      parts,
-      this.texturedMaterial(this.textures.sand(PALETTE.quicksand, PALETTE.quicksandDark)),
-      true,
-    );
+
+    for (const [surface, parts] of byMaterial) {
+      if (surface === 'lava') {
+        // The one emissive material in the world. Lava that took the scene's
+        // lighting like everything else would read as orange rock.
+        const map = this.textures.sand(PALETTE.lava, PALETTE.lavaDark);
+        const material = new MeshLambertMaterial({ map });
+        material.emissive.setHex(0xff5a12);
+        material.emissiveIntensity = 0.65;
+        material.emissiveMap = map;
+        this.materials.push(material);
+        this.addMerged(parts, material, false);
+        continue;
+      }
+      const colours =
+        surface === 'water'
+          ? [PALETTE.water, PALETTE.waterDark]
+          : [PALETTE.quicksand, PALETTE.quicksandDark];
+      this.addMerged(
+        parts,
+        this.texturedMaterial(
+          this.textures.sand(colours[0] as string, colours[1] as string),
+        ),
+        true,
+      );
+    }
   }
 
   /**
@@ -425,6 +464,81 @@ export class CourseWorld {
     }
 
     this.addMerged(leaves, this.solidMaterial(PALETTE.canopyB), false);
+    this.buildProps();
+  }
+
+  /**
+   * The scenery of the later stages: boulders, waterfalls and torches.
+   *
+   * All of it is boxes, and all of it merges into one mesh per material - a
+   * forest of fourteen trees and seven boulders is two draw calls, the same as
+   * a forest of one.
+   */
+  private buildProps(): void {
+    const rocks: BufferGeometry[] = [];
+    const water: BufferGeometry[] = [];
+    const posts: BufferGeometry[] = [];
+    const flames: BufferGeometry[] = [];
+
+    for (const decoration of DECORATIONS) {
+      const { x, y, z, scale } = decoration;
+
+      if (decoration.kind === 'rock') {
+        // Three offset boxes, so a boulder has a silhouette rather than being
+        // a cube with a rock-coloured texture on it.
+        const lumps = [
+          { w: 5.5, h: 4, d: 5, dx: 0, dy: 2, dz: 0 },
+          { w: 3.6, h: 2.6, d: 3.4, dx: 1.8, dy: 1.3, dz: -1.4 },
+          { w: 2.8, h: 3.4, d: 3, dx: -1.6, dy: 1.7, dz: 1.2 },
+        ];
+        for (const lump of lumps) {
+          const box = texturedBox(lump.w * scale, lump.h * scale, lump.d * scale, TILE);
+          box.translate(x + lump.dx * scale, y + lump.dy * scale, z + lump.dz * scale);
+          rocks.push(box);
+        }
+        continue;
+      }
+
+      if (decoration.kind === 'waterfall') {
+        // A flat sheet down the wall, stepped so it reads as falling water
+        // rather than as a painted stripe.
+        for (let i = 0; i < 4; i += 1) {
+          const box = texturedBox(1.2, 6 * scale, (9 - i) * scale, TILE);
+          box.translate(x, y - i * 5.6 * scale, z);
+          water.push(box);
+        }
+        continue;
+      }
+
+      if (decoration.kind === 'torch') {
+        const post = texturedBox(1.2 * scale, 7 * scale, 1.2 * scale, TILE);
+        post.translate(x, y + 3.5 * scale, z);
+        posts.push(post);
+        const flame = texturedBox(2 * scale, 2.4 * scale, 2 * scale, TILE);
+        flame.translate(x, y + 8.2 * scale, z);
+        flames.push(flame);
+      }
+    }
+
+    this.addMerged(rocks, this.solidMaterial(PALETTE.rock), false);
+    this.addMerged(posts, this.solidMaterial(PALETTE.trunk), false);
+
+    if (water.length > 0) {
+      const material = new MeshLambertMaterial({
+        color: PALETTE.water,
+        transparent: true,
+        opacity: 0.78,
+      });
+      this.materials.push(material);
+      this.addMerged(water, material, false);
+    }
+    if (flames.length > 0) {
+      const material = new MeshLambertMaterial({ color: PALETTE.flame });
+      material.emissive.setHex(PALETTE.flame);
+      material.emissiveIntensity = 0.8;
+      this.materials.push(material);
+      this.addMerged(flames, material, false);
+    }
   }
 
   /**
@@ -436,7 +550,7 @@ export class CourseWorld {
    */
   private buildWinPadSigns(): void {
     for (const stage of STAGES) {
-      const sign = new CanvasSign(9, 4.4, [
+      const sign = new CanvasSign(13, 5.4, [
         {
           text: `+${stage.winReward} Win${stage.winReward === 1 ? '' : 's'}`,
           size: 1,
@@ -446,7 +560,7 @@ export class CourseWorld {
         },
         { text: 'Return', size: 0.55, fill: '#ffe9a8', stroke: '#3f3410' },
       ]);
-      sign.mesh.position.set(stage.winPadX, COURSE.floorY + 4.6, stage.winPadZ);
+      sign.mesh.position.set(stage.winPadX, COURSE.floorY + 5.2, stage.winPadZ);
       sign.mesh.rotation.y = Math.PI;
       this.root.add(sign.mesh);
       this.winSigns.push(sign);
@@ -490,6 +604,18 @@ export class CourseWorld {
       case 'ruin':
         return this.texturedMaterial(
           this.textures.stone(hex(PALETTE.ruin), hex(PALETTE.ruinDark)),
+        );
+      case 'ice':
+        return this.texturedMaterial(this.textures.ice(PALETTE.ice, PALETTE.iceStud));
+      case 'stone':
+        return this.texturedMaterial(this.textures.stone(PALETTE.stone, PALETTE.stoneDark));
+      case 'log':
+        return this.texturedMaterial(
+          this.textures.planks(PALETTE.log, PALETTE.logDark, PALETTE.woodSpeck),
+        );
+      case 'metal':
+        return this.texturedMaterial(
+          this.textures.stone(hex(PALETTE.metal), hex(PALETTE.metalDark)),
         );
       case 'pillar':
         return this.brickMaterial();

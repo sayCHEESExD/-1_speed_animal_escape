@@ -38,8 +38,8 @@ export interface TrailTier {
  * and the last is a serious grind.
  *
  * The multipliers are deliberately gentle. A trail scales actual movement
- * speed, which is already multiplied by level and by reboot; a steep ladder
- * here would put a rebooted player through the obby faster than its platforms
+ * speed, which is already multiplied by level and by rebirth; a steep ladder
+ * here would put a rebirthed player through the obby faster than its platforms
  * can be read, which is a worse game rather than a better reward.
  */
 export const TRAIL_TIERS: readonly TrailTier[] = [

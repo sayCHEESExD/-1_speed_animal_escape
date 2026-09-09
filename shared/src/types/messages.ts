@@ -35,8 +35,8 @@ export type RespawnReason =
   | 'join'
   /** Banked a stage and was returned to the arena. */
   | 'stage'
-  /** Rebooted, which resets the run as well as the level curve. */
-  | 'reboot';
+  /** Rebirthed, which resets the run as well as the level curve. */
+  | 'rebirth';
 
 /** Server -> client authoritative respawn (MessageType.Respawn). */
 export interface RespawnMessage {
@@ -77,13 +77,13 @@ export interface StageAwardedMessage {
 }
 
 /**
- * Client -> server: "reboot me".
+ * Client -> server: "rebirth me".
  *
- * Deliberately empty. The server knows the level and the reboot count, and it
+ * Deliberately empty. The server knows the level and the rebirth count, and it
  * is the only thing allowed to decide whether the requirement is met - so
  * there is nothing in this message that could be wrong.
  */
-export type RebootMessage = Record<string, never>;
+export type RebirthMessage = Record<string, never>;
 
 /** Client -> server: buy the trail in this slot. A request, never a grant. */
 export interface BuyTrailMessage {

@@ -145,12 +145,197 @@ export const injectHudStyles = (): void => {
 .aoe-tile--ready .aoe-tile__badge { display: block; }
 .aoe-tile--locked { filter: saturate(0.45) brightness(0.78); }
 
-.aoe-tile--reboot {
+.aoe-tile--rebirth {
   background: linear-gradient(160deg, #ff5ff0 0%, #b23bff 55%, #7a1fd6 100%);
 }
 .aoe-tile--trail {
   background: linear-gradient(160deg, #6de6ff 0%, #2aa8f5 55%, #1670d0 100%);
 }
+.aoe-tile--audio {
+  background: linear-gradient(160deg, #ffd76b 0%, #ffa32b 55%, #d97708 100%);
+}
+/* Muted: the tile stays lit enough to find, and plainly off. */
+.aoe-tile--off { filter: saturate(0.25) brightness(0.7); }
+.aoe-tile--off .aoe-icon { opacity: 0.55; }
+
+/* ---- Trophies flying to the Wins counter --------------------------------
+ * Above the HUD, unlike the Speed popups: these are meant to arrive AT the
+ * counter, so passing behind it would hide the moment they exist for. They
+ * last about half a second and nothing can be clicked through them.
+ */
+.aoe-flight {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 30;
+}
+.aoe-flight__cup {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: clamp(26px, 3vw, 40px);
+  height: auto;
+  opacity: 0;
+  will-change: transform, opacity;
+  filter: drop-shadow(0 3px 5px rgba(0, 0, 0, 0.45));
+}
+.aoe-flight__cup[hidden] { display: none; }
+.aoe-flight__cup--run { animation: aoe-flight 620ms cubic-bezier(0.4, 0, 0.5, 1) forwards; }
+@keyframes aoe-flight {
+  0% {
+    opacity: 0;
+    transform: translate(calc(var(--aoe-fx) - 50%), calc(var(--aoe-fy) - 50%)) scale(0.4) rotate(0deg);
+  }
+  18% {
+    opacity: 1;
+    transform: translate(calc(var(--aoe-fx) - 50%), calc(var(--aoe-fy) - 50%)) scale(1.1) rotate(-20deg);
+  }
+  60% {
+    opacity: 1;
+    transform: translate(calc(var(--aoe-mx) - 50%), calc(var(--aoe-my) - 50%)) scale(0.95) rotate(140deg);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(calc(var(--aoe-tx) - 50%), calc(var(--aoe-ty) - 50%)) scale(0.35) rotate(340deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  /* Still travels - that is the information - but without the tumble. */
+  .aoe-flight__cup--run { animation: aoe-flight-plain 620ms ease-out forwards; }
+  @keyframes aoe-flight-plain {
+    0% { opacity: 0; transform: translate(calc(var(--aoe-fx) - 50%), calc(var(--aoe-fy) - 50%)); }
+    20%, 70% { opacity: 1; }
+    100% { opacity: 0; transform: translate(calc(var(--aoe-tx) - 50%), calc(var(--aoe-ty) - 50%)); }
+  }
+}
+
+/* ---- The Rebirth panel ---------------------------------------------------
+ * A BEFORE and AFTER pair with an arrow between them, as the reference art
+ * frames it: the two things a rebirth changes, side by side, so the trade is
+ * legible at a glance instead of buried in a paragraph.
+ */
+.aoe-rb {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 10px 12px;
+  margin-bottom: 14px;
+}
+.aoe-rb__head {
+  text-align: center;
+  font-size: clamp(15px, 1.6vw, 20px);
+  color: #43506b;
+}
+.aoe-rb__card {
+  display: grid;
+  place-items: center;
+  padding: 10px 8px;
+  border-radius: 12px;
+  border: 3px solid var(--aoe-ink);
+  box-shadow: inset 0 -4px 0 rgba(0, 0, 0, 0.18);
+  font-size: clamp(14px, 1.7vw, 22px);
+  color: #ffffff;
+  /* The figure is the point of the card, so it never wraps and never clips:
+   * it shrinks to fit instead, the same rule the world signs follow. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-shadow:
+    2px 0 0 var(--aoe-ink), -2px 0 0 var(--aoe-ink),
+    0 2px 0 var(--aoe-ink), 0 -2px 0 var(--aoe-ink);
+}
+.aoe-rb__card--speed {
+  background: linear-gradient(180deg, #8fd0ff 0%, #4b9ff0 55%, #2f7ad4 100%);
+}
+.aoe-rb__card--level {
+  background: linear-gradient(180deg, #ffd76b 0%, #ffa32b 55%, #e07f10 100%);
+}
+.aoe-rb__arrow {
+  width: 0;
+  height: 0;
+  justify-self: center;
+  border-top: 15px solid transparent;
+  border-bottom: 15px solid transparent;
+  border-left: 22px solid #c6d8ef;
+  filter: drop-shadow(2px 2px 0 rgba(43, 60, 88, 0.35));
+}
+/* The reference panel sits on a pale blue ground rather than plain white,
+ * which is what keeps the white card text legible. */
+.aoe-panel--rebirth .aoe-panel__body {
+  background: #dce7f5;
+}
+.aoe-rb__warn {
+  margin: 0 0 12px;
+  text-align: center;
+  font-size: clamp(14px, 1.5vw, 19px);
+  color: #f4506a;
+  text-shadow: 1px 1px 0 rgba(255, 255, 255, 0.75);
+}
+.aoe-rb__bar {
+  position: relative;
+  height: 34px;
+  border-radius: 10px;
+  border: 3px solid var(--aoe-ink);
+  background: #ffffff;
+  overflow: hidden;
+  margin-bottom: 14px;
+}
+.aoe-rb__fill {
+  height: 100%;
+  background: linear-gradient(180deg, #9bf06a 0%, #4fce2e 60%, #37a81f 100%);
+  transition: width 220ms ease-out;
+}
+.aoe-rb__barlabel {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: clamp(13px, 1.4vw, 17px);
+  color: #ffffff;
+  text-shadow:
+    2px 0 0 var(--aoe-ink), -2px 0 0 var(--aoe-ink),
+    0 2px 0 var(--aoe-ink), 0 -2px 0 var(--aoe-ink);
+}
+.aoe-rb__go {
+  background: linear-gradient(180deg, #ff8cf0 0%, #b44bff 55%, #7f22d6 100%);
+  color: #ffffff;
+  font-size: clamp(17px, 2vw, 26px);
+}
+.aoe-rb__go:disabled {
+  filter: saturate(0.3) brightness(0.85);
+}
+@media (prefers-reduced-motion: reduce) {
+  .aoe-rb__fill { transition: none; }
+}
+
+/* ---- The desktop hint ---------------------------------------------------
+ * Pointer lock hides the cursor, so a mouse-and-keyboard player has no way to
+ * discover that the rail is clickable at all. This says so, and swaps to the
+ * way back the instant the cursor is handed over - both halves driven by the
+ * one class MouseLook sets, so the hint cannot contradict the input state.
+ */
+.aoe-hint {
+  position: fixed;
+  /* Bottom RIGHT, not bottom centre: the Speed figure and the level bar own
+   * the middle of the screen, and a hint printed across them is worse than no
+   * hint at all. */
+  right: 16px;
+  bottom: 18px;
+  transform: none;
+  z-index: 21;
+  pointer-events: none;
+  font-size: clamp(11px, 1.1vw, 14px);
+  letter-spacing: 0.02em;
+  color: #ffffff;
+  opacity: 0.72;
+  text-shadow:
+    2px 0 0 var(--aoe-ink), -2px 0 0 var(--aoe-ink),
+    0 2px 0 var(--aoe-ink), 0 -2px 0 var(--aoe-ink);
+  white-space: nowrap;
+}
+.aoe-hint__free { display: none; }
+body.aoe-cursor-free .aoe-hint__locked { display: none; }
+body.aoe-cursor-free .aoe-hint__free { display: inline; }
 
 /* ---- Panels ------------------------------------------------------------- */
 .aoe-panel {
@@ -181,7 +366,7 @@ export const injectHudStyles = (): void => {
   color: #fff;
   font-size: 22px;
 }
-.aoe-panel--reboot .aoe-panel__head {
+.aoe-panel--rebirth .aoe-panel__head {
   background: linear-gradient(90deg, #b23bff, #7a1fd6);
 }
 .aoe-panel--trail .aoe-panel__head {
@@ -259,11 +444,93 @@ export const injectHudStyles = (): void => {
   cursor: not-allowed;
 }
 
+/* ---- Speed-gain popups -------------------------------------------------- */
+/*
+ * Deliberately BELOW the HUD in the stacking order (the bar is 20, the rail 21,
+ * the Wins counter 22). Popups are spawned inside a band that already misses
+ * all three, and sitting under them means even a mis-tuned band can never
+ * cover a figure the player needs to read.
+ */
+.aoe-pops {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 19;
+}
+.aoe-pop {
+  --aoe-pop-tilt: 0deg;
+  --aoe-pop-scale: 1;
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  opacity: 0;
+  will-change: transform, opacity;
+}
+.aoe-pop[hidden] { display: none; }
+.aoe-pop__icon {
+  /* run.png is 563x585. Driving the HEIGHT and leaving the width automatic is
+   * what keeps that ratio exact at every clamp step. */
+  height: clamp(36px, 4.2vw, 60px);
+  width: auto;
+  filter: drop-shadow(0 3px 5px rgba(0, 0, 0, 0.45));
+}
+.aoe-pop__value {
+  font-size: clamp(16px, 2vw, 29px);
+  line-height: 1;
+  color: #fff;
+  text-shadow:
+    3px 0 0 var(--aoe-ink), -3px 0 0 var(--aoe-ink),
+    0 3px 0 var(--aoe-ink), 0 -3px 0 var(--aoe-ink),
+    2px 2px 0 var(--aoe-ink), -2px 2px 0 var(--aoe-ink),
+    2px -2px 0 var(--aoe-ink), -2px -2px 0 var(--aoe-ink),
+    0 4px 8px rgba(0, 0, 0, 0.5);
+}
+.aoe-pop--run { animation: aoe-pop-float 1150ms ease-out forwards; }
+@keyframes aoe-pop-float {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) rotate(var(--aoe-pop-tilt))
+      scale(calc(var(--aoe-pop-scale) * 0.6));
+  }
+  16% {
+    opacity: 1;
+    transform: translate(-50%, -54%) rotate(var(--aoe-pop-tilt))
+      scale(calc(var(--aoe-pop-scale) * 1.1));
+  }
+  30% {
+    opacity: 1;
+    transform: translate(-50%, -62%) rotate(var(--aoe-pop-tilt))
+      scale(var(--aoe-pop-scale));
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -125%) rotate(var(--aoe-pop-tilt))
+      scale(var(--aoe-pop-scale));
+  }
+}
+
 /* Touch controls own the bottom corners; the rail lifts clear of them. */
 body.aoe-touch-mode .aoe-rail { --aoe-rail: 62px; }
 
 @media (prefers-reduced-motion: reduce) {
   .aoe-tile, .aoe-wins--pop .aoe-wins__value { transition: none; animation: none; }
+  /* The popup still has to appear and go away, so it fades in place rather
+   * than not animating at all. */
+  .aoe-pop--run { animation: aoe-pop-fade 1150ms ease-out forwards; }
+  @keyframes aoe-pop-fade {
+    0% { opacity: 0; transform: translate(-50%, -50%); }
+    15%, 65% { opacity: 1; transform: translate(-50%, -50%); }
+    100% { opacity: 0; transform: translate(-50%, -50%); }
+  }
+}
+
+/* A narrow window has less room either side, so the band tightens with it. */
+@media (max-width: 760px) {
+  .aoe-pop__icon { height: clamp(30px, 6vw, 44px); }
+  .aoe-pop__value { font-size: clamp(14px, 3vw, 22px); }
 }
 `;
   document.head.appendChild(style);
@@ -285,8 +552,23 @@ body.aoe-touch-mode .aoe-rail { --aoe-rail: 62px; }
 const icon = (file: string): string =>
   `<img class="aoe-icon" src="/ui/${file}" alt="" draggable="false">`;
 
+/*
+ * The speaker is drawn rather than loaded.
+ *
+ * The other three are SUPPLIED ART and are used as they are; there is no
+ * supplied speaker, and adding an image for a shape that is four straight
+ * lines would be the one place in this project where a file bought nothing.
+ */
+const SPEAKER =
+  '<svg class="aoe-icon" viewBox="0 0 24 24" aria-hidden="true">' +
+  '<path fill="currentColor" d="M4 9h3.2L12 4.6v14.8L7.2 15H4z"/>' +
+  '<path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+  'd="M15.6 8.6a4.6 4.6 0 0 1 0 6.8M18.4 5.8a8.4 8.4 0 0 1 0 12.4"/>' +
+  '</svg>';
+
 export const ICONS = {
   trophy: icon('trophy.png'),
-  reboot: icon('rebirth.png'),
+  rebirth: icon('rebirth.png'),
   trail: icon('trail.png'),
+  audio: SPEAKER,
 } as const;

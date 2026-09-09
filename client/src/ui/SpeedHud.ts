@@ -1,6 +1,6 @@
 import {
   formatSpeed,
-  rebootMultiplier,
+  rebirthMultiplier,
   resolveLevel,
   type LevelProgress,
 } from '@animal/shared';
@@ -44,7 +44,7 @@ export class SpeedHud {
     this.speedLabel = el('div', 'aoe-hud__speed');
     this.speedLabel.textContent = '0 Speed';
     this.multiLabel = el('div', 'aoe-hud__multi');
-    this.multiLabel.textContent = 'x1 Multi (Reboot)';
+    this.multiLabel.textContent = 'x1 Multi (Rebirth)';
     speedRow.append(this.speedLabel, this.multiLabel);
 
     const bar = el('div', 'aoe-hud__bar');
@@ -84,7 +84,7 @@ export class SpeedHud {
 
     if (rebirths !== this.lastRebirths) {
       this.lastRebirths = rebirths;
-      this.multiLabel.textContent = `x${rebootMultiplier(rebirths)} Multi (Reboot)`;
+      this.multiLabel.textContent = `x${rebirthMultiplier(rebirths)} Multi (Rebirth)`;
     }
   }
 

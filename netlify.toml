@@ -10,6 +10,16 @@
 
 [build.environment]
   NODE_VERSION = "20"
+  # WHERE THE GAME SERVER IS. Set this in the Netlify site's environment
+  # variables, not here, and rebuild after changing it - Vite bakes it into the
+  # bundle at build time and there is no later step in which to inject it.
+  #
+  # Netlify hosts STATIC FILES ONLY. It cannot run the Colyseus server, so this
+  # has to point at wherever that is actually hosted, over wss:// because the
+  # site itself is https and a browser will not open an insecure socket from a
+  # secure page. Without it the client boots, plays offline, and says so.
+  #
+  #   VITE_SERVER_URL = "wss://your-colyseus-host.example.com"
 
 [[redirects]]
   from = "/*"

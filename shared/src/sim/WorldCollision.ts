@@ -7,6 +7,7 @@ import {
   SINKING_SOLIDS,
   corridorHalfWidthAt,
   hazardPositionAt,
+  hazardZRange,
   quicksandAt,
   sinkingOffsetAt,
   stageAt,
@@ -93,7 +94,7 @@ export class WorldCollision {
   private time = 0;
 
   /** Scratch for a hazard position, so the kill test allocates nothing. */
-  private readonly hazardAt = { x: 0, z: 0 };
+  private readonly hazardAt = { x: 0, y: 0, z: 0 };
 
   constructor() {
     let lowest = Number.POSITIVE_INFINITY;
@@ -116,10 +117,14 @@ export class WorldCollision {
     for (let i = 0; i < COURSE_HAZARDS.length; i += 1) {
       const hazard = COURSE_HAZARDS[i];
       if (!hazard) continue;
-      // A sweeper stays in its own Z; a roller travels the length of its lane,
-      // so it has to appear in every bucket that lane crosses.
-      const from = hazard.kind === 'roller' ? bucketOf(hazard.toZ) - 1 : bucketOf(hazard.z) - 1;
-      const to = hazard.kind === 'roller' ? bucketOf(hazard.fromZ) + 1 : bucketOf(hazard.z) + 1;
+      // How far along Z a hazard can ever get is a property OF THE HAZARD, so
+      // it is answered in one place. A roller travels its whole lane and a
+      // spinner reaches a radius either side of its hub; bucketing either as
+      // if it stood still would leave it drawn, lethal on the server, and
+      // completely absent from the client's prediction.
+      const span = hazardZRange(hazard);
+      const from = bucketOf(span.minZ) - 1;
+      const to = bucketOf(span.maxZ) + 1;
       for (let b = from; b <= to; b += 1) {
         let list = this.hazardBuckets.get(b);
         if (!list) {
@@ -314,10 +319,15 @@ export class WorldCollision {
     for (const index of indices) {
       const hazard = COURSE_HAZARDS[index];
       if (!hazard) continue;
-      if (head < hazard.y - hazard.radius) continue;
-      if (feet > hazard.y + hazard.radius) continue;
 
+      // Position FIRST, height test second. A faller's whole point is that its
+      // Y changes, so testing against the authored `hazard.y` would have it
+      // kill from the top of its hover - or, with the sign the other way,
+      // never kill at all.
       hazardPositionAt(hazard, time, this.hazardAt);
+      if (head < this.hazardAt.y - hazard.radius) continue;
+      if (feet > this.hazardAt.y + hazard.radius) continue;
+
       const reach = hazard.radius + MOUNT_RADIUS;
       if (Math.abs(z - this.hazardAt.z) > reach) continue;
       if (Math.abs(x - this.hazardAt.x) > reach) continue;

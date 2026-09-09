@@ -3,6 +3,9 @@ import {
   type RespawnMessage,
   type StageAwardedMessage,
 } from '@animal/shared';
+import { AudioManager } from '../audio/AudioManager.js';
+import { PlayerAudio } from '../audio/PlayerAudio.js';
+import { Vector3 } from 'three';
 import { ThirdPersonCamera } from '../camera/ThirdPersonCamera.js';
 import { clientConfig } from '../config/clientConfig.js';
 import { InputManager } from '../input/InputManager.js';
@@ -16,15 +19,20 @@ import { RendererManager } from '../rendering/RendererManager.js';
 import { SceneManager } from '../rendering/SceneManager.js';
 import { Panel, anyPanelOpen } from '../ui/Panel.js';
 import { RailButton } from '../ui/RailButton.js';
-import { RebootPanel } from '../ui/RebootPanel.js';
+import { RebirthPanel } from '../ui/RebirthPanel.js';
 import { SpeedHud } from '../ui/SpeedHud.js';
+import { SpeedPopups } from '../ui/SpeedPopups.js';
 import { TrailShop } from '../ui/TrailShop.js';
+import { WinFlight } from '../ui/WinFlight.js';
 import { WinsCounter } from '../ui/WinsCounter.js';
 import { ICONS, injectHudStyles } from '../ui/hudStyles.js';
 import { logger } from '../util/logger.js';
 import { CourseWorld } from '../world/CourseWorld.js';
 
 const SCOPE = 'Game';
+
+/** Scratch for projecting the mount to the screen. One award allocates nothing. */
+const WIN_FLIGHT_ORIGIN = new Vector3();
 
 /**
  * Composition root.
@@ -41,11 +49,17 @@ export class Game {
   private readonly input = new InputManager();
   private readonly remotePlayers: RemotePlayerManager;
   private readonly hud: SpeedHud;
+  private readonly pops: SpeedPopups;
   private readonly wins: WinsCounter;
+  private readonly winFlight: WinFlight;
   private readonly rail: HTMLDivElement;
-  private readonly rebootButton: RailButton;
+  private readonly rebirthButton: RailButton;
   private readonly trailButton: RailButton;
-  private readonly rebootPanel: RebootPanel;
+  private readonly audioButton: RailButton;
+  private readonly audio = new AudioManager();
+  private readonly playerAudio: PlayerAudio;
+  private readonly hint: HTMLDivElement;
+  private readonly rebirthPanel: RebirthPanel;
   private readonly trailShop: TrailShop;
   private readonly network: NetworkClient;
   private readonly world = new CourseWorld();
@@ -53,6 +67,10 @@ export class Game {
 
   private localPlayer: LocalPlayer | null = null;
   private localSessionId: string | null = null;
+
+  /** Replicated figures the audio reacts to, so it reacts to CHANGES. */
+  private lastLevel = -1;
+  private lastRebirths = -1;
   private modelReport: PlayerModelReport | null = null;
 
   /**
@@ -76,7 +94,9 @@ export class Game {
     this.renderer = new RendererManager(container);
     this.remotePlayers = new RemotePlayerManager(this.sceneManager.scene);
     this.hud = new SpeedHud(container);
+    this.pops = new SpeedPopups(container);
     this.wins = new WinsCounter(container);
+    this.winFlight = new WinFlight(container);
 
     // The left rail. Two tiles for now, laid out so a third can be added
     // without re-spacing the others.
@@ -84,17 +104,17 @@ export class Game {
     this.rail.className = 'aoe-rail';
     container.appendChild(this.rail);
 
-    this.rebootPanel = new RebootPanel(container, () => this.network.requestReboot());
+    this.rebirthPanel = new RebirthPanel(container, () => this.network.requestRebirth());
     this.trailShop = new TrailShop(container, {
       buy: (slot) => this.network.buyTrail(slot),
       equip: (slot) => this.network.equipTrail(slot),
     });
 
-    this.rebootButton = new RailButton(this.rail, {
-      variant: 'reboot',
-      label: 'Reboot',
-      icon: ICONS.reboot,
-      onClick: () => this.openOnly(this.rebootPanel),
+    this.rebirthButton = new RailButton(this.rail, {
+      variant: 'rebirth',
+      label: 'Rebirth',
+      icon: ICONS.rebirth,
+      onClick: () => this.openOnly(this.rebirthPanel),
     });
     this.trailButton = new RailButton(this.rail, {
       variant: 'trail',
@@ -102,6 +122,42 @@ export class Game {
       icon: ICONS.trail,
       onClick: () => this.openOnly(this.trailShop),
     });
+    this.audioButton = new RailButton(this.rail, {
+      variant: 'audio',
+      label: 'Sound',
+      icon: ICONS.audio,
+      onClick: () => {
+        // The ONE place muting happens, whether it was a click or the M key.
+        const muted = this.audio.toggleMuted();
+        this.audioButton.root.classList.toggle('aoe-tile--off', muted);
+      },
+    });
+
+    this.playerAudio = new PlayerAudio(this.audio);
+
+    /*
+     * The hint that makes the rail reachable on a desktop.
+     *
+     * Pointer lock hides the cursor, so without being told, a mouse-and-
+     * keyboard player has no way to know these buttons can be clicked at all.
+     * It shows while the cursor is captured and swaps to the way back as soon
+     * as it is not - both driven by the class `MouseLook` sets, so the hint
+     * cannot disagree with the actual input state.
+     */
+    this.hint = document.createElement('div');
+    this.hint.className = 'aoe-hint aoe-font';
+    this.hint.innerHTML =
+      '<span class="aoe-hint__locked">Esc for cursor &middot; R Rebirth &middot; T Trails</span>' +
+      '<span class="aoe-hint__free">Click the world to play on</span>';
+    container.appendChild(this.hint);
+
+    window.addEventListener('keydown', this.onHotkey);
+    // Audio can only start on a real gesture, and no single one of them is
+    // guaranteed to be the one the browser accepts - so every gesture asks,
+    // and `resume` is written to be safe to call repeatedly.
+    window.addEventListener('keydown', this.onGesture);
+    window.addEventListener('mousedown', this.onGesture);
+    window.addEventListener('touchstart', this.onGesture, { passive: true });
 
     this.renderer.onResize((width, height) => this.camera.setViewport(width, height));
 
@@ -142,13 +198,62 @@ export class Game {
   }
 
   /**
+   * Keys that open the menus.
+   *
+   * Point 12's other half: a panel that can only be reached by clicking a
+   * button the cursor cannot reach is not reachable, so there is a key for
+   * each one as well. Ignored while the player is typing, and ignored with a
+   * modifier held, so browser shortcuts still work.
+   */
+  private readonly onHotkey = (event: KeyboardEvent): void => {
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
+    if (event.repeat) return;
+    const target = event.target as HTMLElement | null;
+    if (target && (target.tagName === 'INPUT' || target.isContentEditable)) return;
+
+    /*
+     * A key PRESSES THE BUTTON. It does not do the same thing as the button.
+     *
+     * `RailButton.press()` dispatches the tile's own click, so the key path and
+     * the mouse path run one handler between them - and a key can never drift
+     * into doing almost-but-not-quite what the tile it stands for does. The
+     * mute key used to toggle the audio itself and repaint the tile by hand,
+     * which is two copies of one action waiting to disagree.
+     */
+    switch (event.code) {
+      case 'KeyR':
+        this.rebirthButton.press();
+        break;
+      case 'KeyT':
+        this.trailButton.press();
+        break;
+      case 'KeyM':
+        this.audioButton.press();
+        break;
+      case 'Escape':
+        // The browser releases the lock on Escape whatever the page wants, so
+        // this only closes whatever was open - `MouseLook` handles the cursor.
+        for (const panel of [this.rebirthPanel, this.trailShop]) panel.setOpen(false);
+        this.input.look.setCursorFree(true);
+        break;
+      default:
+        break;
+    }
+  };
+
+  /** Any real gesture is permission to start audio. */
+  private readonly onGesture = (): void => {
+    this.audio.resume();
+  };
+
+  /**
    * Open one panel and close the other.
    *
    * Two modals over each other is a state with no way back to the game, and
    * the rail makes it one click away.
    */
   private openOnly(panel: Panel): void {
-    for (const other of [this.rebootPanel, this.trailShop]) {
+    for (const other of [this.rebirthPanel, this.trailShop]) {
       if (other !== panel) other.setOpen(false);
     }
     panel.toggle();
@@ -231,6 +336,15 @@ export class Game {
       // the server's own transform when it has already arrived.
       if (player.deathComplete) this.applyPendingRespawn();
 
+      // Still not placed. The prediction and the server disagreed about the
+      // death, so ASK for a placement rather than sit frozen waiting for one
+      // that was never coming. The server answers this the same way it answers
+      // any other death - by putting the player at the spawn.
+      if (player.consumeRespawnNudge()) {
+        logger.warn(SCOPE, 'death was not acknowledged; requesting a respawn');
+        this.network.requestRespawn();
+      }
+
       this.snapCameraIfPlaced();
       this.camera.setTarget(player.position);
       this.sceneManager.followShadow(
@@ -241,6 +355,11 @@ export class Game {
       this.flushInput();
     }
 
+    if (player) this.playerAudio.update(delta, player);
+    // The boards redraw only when the standings actually move, so handing them
+    // the snapshot every frame costs a string compare.
+    this.world.scoreboard.update(this.network.leaderboard);
+    this.pops.update(delta);
     this.world.update(delta, elapsed);
     this.remotePlayers.advance(delta);
     this.camera.update(delta, player?.horizontalSpeed ?? 0);
@@ -337,17 +456,31 @@ export class Game {
     player.setTrailSlot(state.trailSlot);
 
     this.hud.update(state.totalSpeed, state.maxLevel, state.rebirths);
+    // Only an INCREASE in the replicated total spawns a popup, so the figure
+    // simply being re-sent on every patch never does.
+    this.pops.observe(state.totalSpeed);
     this.wins.update(state.wins);
     this.run.setInventory(state.ownedAnimals, state.wins);
 
     // The rail mirrors replicated state and decides nothing. A tile is "ready"
     // when the server would accept the request behind it right now.
-    this.rebootPanel.setProgress(state.level, state.rebirths);
-    this.rebootButton.setState(this.rebootPanel.isEligible, !this.rebootPanel.isEligible);
+    // Milestone sounds fire on the CHANGE, never on the value: a level is
+    // re-sent on every patch, and playing on the level would be a fanfare
+    // twenty times a second for as long as the player stayed at it.
+    if (this.lastLevel >= 0 && state.level > this.lastLevel) this.audio.play('level');
+    if (this.lastRebirths >= 0 && state.rebirths > this.lastRebirths) {
+      this.audio.play('rebirth');
+    }
+    this.lastLevel = state.level;
+    this.lastRebirths = state.rebirths;
+
+    this.rebirthPanel.setProgress(state.level, state.rebirths);
+    this.rebirthButton.setState(this.rebirthPanel.isEligible, !this.rebirthPanel.isEligible);
     this.trailShop.setInventory(state.wins, state.ownedTrails, state.trailSlot);
     this.trailButton.setState(this.trailShop.hasAffordable);
 
     if (state.ownedAnimals !== this.lastOwnedAnimals) {
+      if (this.lastOwnedAnimals !== 0) this.audio.play('claim');
       this.lastOwnedAnimals = state.ownedAnimals;
       this.world.stands.setOwned(state.ownedAnimals);
     }
@@ -357,8 +490,42 @@ export class Game {
     // The counter pops from the replicated total on the next patch anyway;
     // applying it here means the reward lands on the frame it was earned
     // rather than up to a patch later.
+    // Trophies first, then the figure. They are launched from where the mount
+    // actually is on screen, projected once here rather than tracked per
+    // frame - the flight is half a second and the player does not move during
+    // it, because banking a stage has already returned them to the arena.
+    this.launchWinFlight();
     this.wins.update(message.total);
+    this.audio.play('win');
     logger.info(SCOPE, `stage ${message.stageIndex} banked: +${message.wins} wins`);
+  }
+
+  /**
+   * Project the mount to the screen and send the trophies from there.
+   *
+   * Falls back to the middle of the screen if there is no player yet, so the
+   * effect can never be the thing that throws during an award.
+   */
+  private launchWinFlight(): void {
+    const canvas = this.renderer.renderer.domElement;
+    const box = canvas.getBoundingClientRect();
+    let x = box.left + box.width / 2;
+    let y = box.top + box.height / 2;
+
+    const player = this.localPlayer;
+    if (player) {
+      WIN_FLIGHT_ORIGIN.copy(player.position);
+      WIN_FLIGHT_ORIGIN.y += 2;
+      WIN_FLIGHT_ORIGIN.project(this.camera.camera);
+      // Behind the camera projects to a mirrored point in front of it, which
+      // would fling the trophies off the wrong edge.
+      if (WIN_FLIGHT_ORIGIN.z < 1) {
+        x = box.left + ((WIN_FLIGHT_ORIGIN.x + 1) / 2) * box.width;
+        y = box.top + ((1 - WIN_FLIGHT_ORIGIN.y) / 2) * box.height;
+      }
+    }
+
+    this.winFlight.play(x, y);
   }
 
   private onStatusChange(status: ConnectionStatus): void {
@@ -368,10 +535,19 @@ export class Game {
   dispose(): void {
     this.stop();
     this.hud.dispose();
+    this.pops.dispose();
     this.wins.dispose();
-    this.rebootButton.dispose();
+    this.winFlight.dispose();
+    window.removeEventListener('keydown', this.onHotkey);
+    window.removeEventListener('keydown', this.onGesture);
+    window.removeEventListener('mousedown', this.onGesture);
+    window.removeEventListener('touchstart', this.onGesture);
+    this.audio.dispose();
+    this.hint.remove();
+    this.rebirthButton.dispose();
     this.trailButton.dispose();
-    this.rebootPanel.dispose();
+    this.audioButton.dispose();
+    this.rebirthPanel.dispose();
     this.trailShop.dispose();
     this.rail.remove();
     this.remotePlayers.dispose();

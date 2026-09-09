@@ -27,7 +27,7 @@ engine. Do not add a framework or a build tool without a concrete need.
 
 ## Hard constraints
 
-- Final browser build must stay **under 12 MB**. It is currently ~0.9 MB.
+- Final browser build must stay **under 12 MB**. It is currently ~1.2 MB.
 - **Progression and rewards are server-authoritative.** The client may predict
   for UI feel but never decides, computes or claims a reward.
 - Desktop and mobile browsers are both first-class. No desktop-only input
@@ -40,16 +40,20 @@ engine. Do not add a framework or a build tool without a concrete need.
   hosts the client often exports `PORT` for its own web server and the game
   server would otherwise bind to it.
 
-## Reboot, trails and training
+## Rebirth, trails and training
 
-- **Reboot** is the prestige ladder, ported from the previous game's rebirth
-  system and behaviourally identical. `REBOOT_TIERS` is the authored head
-  (level 25 -> x2, level 50 -> x3) and `EXTENSION` continues the same pattern
-  for ever, so a third reboot is one row in a table.
-- The level CAP is not a constant: it is whatever the next reboot requires, so
-  reaching the cap and unlocking a reboot are the same moment. A cap is a gate,
-  never a dead end.
-- A reboot resets the level curve - which means clearing `totalSpeed`, because
+- The prestige ladder is called **REBIRTH**, everywhere: `REBIRTH_TIERS`,
+  `RebirthService`, `RebirthPanel`, the rail tile and every string the player
+  reads. It was briefly called Reboot; the replicated field was `rebirths`
+  throughout even then, which is the tell that the other name was the odd one.
+  Do not reintroduce it.
+- `REBIRTH_TIERS` is the authored head (level 25 -> x2, level 50 -> x3) and
+  `EXTENSION` continues the same pattern for ever, so a third rebirth is one
+  row in a table.
+- The level CAP is not a constant: it is whatever the next rebirth requires, so
+  reaching the cap and unlocking a rebirth are the same moment. A cap is a
+  gate, never a dead end.
+- A rebirth resets the level curve - which means clearing `totalSpeed`, because
   level FOLLOWS from it - and deliberately keeps Wins, animals and trails. It
   also returns the player to the arena: their speed is no longer what carried
   them to wherever they were standing.
@@ -57,8 +61,8 @@ engine. Do not add a framework or a build tool without a concrete need.
   `extraMultiplier` and never a calculation of their own. The equipped animal
   owns Speed-per-stride; the two axes never cross.
 - Trail multipliers are deliberately gentle. Movement speed is already
-  multiplied by level and by reboot, and a steep cosmetic ladder on top puts a
-  rebooted player through the obby faster than its platforms can be read.
+  multiplied by level and by rebirth, and a steep cosmetic ladder on top puts a
+  reborn player through the obby faster than its platforms can be read.
 - **Treadmills** are three IDENTICAL belts on the training deck. Identical is
   the point: they are somewhere to farm while chatting, not a ladder, so there
   is nothing to choose between them and no reason to queue.
@@ -152,15 +156,38 @@ engine. Do not add a framework or a build tool without a concrete need.
   enough Wins. Reaching the Wins total alone does nothing.
   Wins are SPENT - the price is deducted - and the highest tier OWNED is always
   equipped, so a purchase can never downgrade anyone.
+- **THERE ARE NO CHECKPOINTS, and there must not be any.** Every placement -
+  a death, a stage banked, a rebirth, a fresh join - puts the player at
+  `SPAWN_POSITION` and nowhere else. `CourseRoom.placeAt` takes no position for
+  exactly that reason: a parameter is a place a second destination can be
+  passed, and the checkpoint system that used to live there is what made dying
+  on stage 12 leave the player on stage 12.
+- The loop is deliberate, not a punishment: a run ends at the arena, where the
+  animals, the treadmills and the boards are. Coming back is how a player
+  spends what they just earned.
 - **Wins** come from crossing a stage's win pad - a small rectangle at the
   player's RIGHT at the stage end. Crossing it awards that stage's Wins and
   RETURNS the player to the arena, which is what the pad's "Return" label
   promises and also what makes a second payment impossible: the pad is hundreds
   of units behind them before another request could arrive. The cooldown is
   spam protection only, which is why it is short and checked last.
-- Stage rewards are 1, 3, 8, 20, 50, 120, 200, 400 and live in ONE table,
-  `STAGE_REWARDS`. Anything past it continues the same doubling curve, so a
-  ninth stage needs no edit.
+- Stage rewards are 1, 3, 8, 20, 50, 120, 200, 400 and then keep accelerating
+  to 90,000 at stage 20. They live in ONE table, `STAGE_REWARDS`, and anything
+  past it continues the same curve. `verify-course` enforces that the list is
+  strictly increasing: a later stage worth fewer Wins than an earlier one would
+  make the whole ladder something to farm backwards.
+- **There are twenty stages, and every one of them is authored.** Name,
+  difficulty word and recommended level live in `STAGE_TUNING`, one row per
+  stage, so the ladder is tuned by editing a table.
+- The recommended SPEED is DERIVED from the recommended level through
+  `totalSpeedToReach` - the same curve the player actually levels on - and
+  never written beside it. A hand-authored figure is free to drift into
+  advertising a total that does not correspond to the level printed next to it,
+  and the gate shows both.
+- The ladder respects the rebirth cap of 25 levels per rebirth: stage 5 at
+  level 19 is inside a first run, stage 10 at 58 wants two rebirths, stage 20
+  at 120 wants four. `verify-course` prints that figure, so a stage that
+  quietly starts demanding six is visible the moment it is added.
 
 **Multiplayer**
 
@@ -197,9 +224,15 @@ engine. Do not add a framework or a build tool without a concrete need.
 - The rider's hip joints sit **1.21 world units** above the model's own origin.
   Every animal's `riderOffset.y` is `belly + bodyHeight + 0.2 - 1.21`. Setting
   it to the saddle height instead buries the rider's legs inside the barrel.
-- **There is not one image file in the build.** Every world texture - the
+- **Not one image file is used for the WORLD.** Every world texture - the
   studded ground, the brick walls, the planks, the gold pads, the chevrons and
-  the sky - is drawn on a canvas at runtime by `WorldTextures`.
+  the sky - is drawn on a canvas at runtime by `WorldTextures`. Do not add an
+  image for something `WorldTextures` could draw.
+- The only images in the build are the supplied rider FBX and its texture, and
+  the four HUD icons in `client/public/ui/` (`trophy`, `rebirth`, `trail`,
+  `run`). Those are SUPPLIED ART and are used as they are: never regenerate one
+  procedurally, and never set both dimensions in CSS - drive one and leave the
+  other automatic so the real aspect ratio survives. `run.png` is 563 x 585.
 
 ## Animals
 
@@ -265,6 +298,32 @@ Procedural, and required for the finished game - not a placeholder.
 - The client ADVANCES its own copy of that clock between patches and re-bases it
   whenever a fresher `elapsed` arrives. Freezing it between patches makes every
   moving thing stutter at the patch rate.
+- The later stages add exactly THREE hazard motions, and no new physics:
+  `spinner` orbits a centre, `faller` drops onto a spot and rises again, and
+  `tornado` is a spinner drawn as a funnel. Every log, arm, hammer, boulder and
+  crusher in stages 6-20 is one of those - a bar is several spinners at stepped
+  radii sharing one phase, which is why there is still only one hazard shape to
+  test against.
+- `hazardZRange` and `hazardReachX` are the ONE definition of how far a hazard
+  can travel. `sweep` means different things to different kinds - an amplitude,
+  an orbit radius, a fall HEIGHT - and code that assumed one meaning bucketed
+  crushers as if they hung through the wall.
+- A hazard's Y is evaluated, not authored: `touchesHazard` takes the position
+  first and tests the height against THAT. Testing against the authored `y`
+  would have every faller kill from the top of its hover.
+- **`SurfaceRegion` changes how the mount HANDLES**, and it is read inside
+  `stepPlayer` itself. Ice lowers `grip` (acceleration AND braking together -
+  lowering only braking makes a mount harder to stop rather than harder to
+  steer) and the wind tunnel adds a constant `windX`. Both sides run the one
+  formula; a client predicting different handling from the server would spend
+  the whole stage being pulled back to a position it did not steer to.
+- A quicksand pit carries a `surface` - sand, lava or water. They kill
+  identically and by the same rule; only the look differs, which is what lets
+  three stages share one mechanic without reading as one stage built three
+  times.
+- A sinking platform laid ON a floor is SCENERY: it drops, the ground under it
+  does not, and nothing happens. The temple's trap bays are holes in the floor
+  for that reason.
 - **The elephant is the one exception, deliberately.** It CHASES, so its
   position depends on where the players are - that is state, not a formula - so
   the server simulates it, replicates x/z/yaw/charging, and decides the trample
@@ -272,6 +331,19 @@ Procedural, and required for the finished game - not a placeholder.
 - Quicksand is a per-region death plane a couple of units under the platforms,
   not the global one. Being swallowed by sand reads far better than falling
   twenty units first.
+- The corridor is **64 units wide** (`COURSE.halfWidth` 32), and every obstacle
+  offset is written as a FRACTION of it through `lane()`. That is the whole
+  reason the course could be doubled in width without re-authoring a single
+  pattern: a literal `x: 7` would have left every platform huddled around the
+  centreline of a corridor twice as wide.
+- Places that open out are declared in **`WIDE_AREAS`**, and there is exactly
+  one list. The floor, `clampToBounds`, `corridorHalfWidthAt`, the wall run and
+  the treeline all read it, so a span the renderer draws wide and the collision
+  keeps narrow cannot exist. Adding a wide area is an entry, not a change in
+  five places.
+- `buildWalls` walks BOUNDARY MARKS derived from that list rather than a fixed
+  span, emitting a shoulder wall at each width change. A wall run that assumed
+  a constant width left the ruins arena open at the sides.
 - The pink walls are **scenery**. What holds the player in is
   `WorldCollision.clampToBounds`, applied after the substep has already
   integrated, so no speed can tunnel it - a wall collider could be.
@@ -282,6 +354,15 @@ Procedural, and required for the finished game - not a placeholder.
   island each stretch one copy of the texture over themselves.
 - World signs are **single-sided**. A double-sided panel is legible from the
   front and MIRRORED from behind, which is worse than not being there.
+- **Sign text is sized to FIT.** `CanvasSign` measures the string and shrinks
+  until the glyphs AND their outline sit inside the panel. Sizing a line from
+  its height band alone - with nothing ever measured against the panel's WIDTH
+  - is what ran "60.0K Wins Required", "TRAINING" and "+3 Speed" off the ends
+  of their own textures; `strokeText` also paints half a line width outside the
+  glyphs, so the outline has to be budgeted for too.
+- The panels are authored WIDE ENOUGH that the shrink rarely has to act. The
+  fix for clipped text is never "make the text smaller" - that is the symptom
+  treated as the cure.
 
 ## Architecture rules
 
@@ -315,8 +396,9 @@ Procedural, and required for the finished game - not a placeholder.
 
 ## UI
 
-The HUD is: **Wins** upper centre, **Reboot** and **Trails** on the left rail,
-and **Speed** and **Level** along the bottom. Nothing else yet.
+The HUD is: **Wins** upper centre, **Rebirth**, **Trails** and **Sound** down
+the left rail, and **Speed** and **Level** along the bottom. The Speed-gain
+popups float over the middle. Nothing else yet.
 
 - `hudStyles.ts` owns the one stylesheet and the inline SVG icons, so the rail,
   the win counter and both panels cannot drift apart visually.
@@ -326,6 +408,113 @@ and **Speed** and **Level** along the bottom. Nothing else yet.
 - `Panel` counts open modals and the input layer polls that count to suppress
   movement. A COUNT rather than a boolean, so two panels closing out of order
   cannot leave the game permanently suppressed.
+- **Speed-gain popups** (`SpeedPopups`) are driven by an ACCUMULATOR over the
+  replicated total, never by raw patches. Speed climbs continuously while
+  riding and the server sends twenty patches a second, so one popup per patch
+  would be an unreadable stream and one node per patch would put hundreds of
+  elements in the document inside a minute. The gain is banked and released on
+  a fixed cadence, and only an INCREASE counts - the first reading merely takes
+  a baseline, or a returning player's lifetime total would fire on join.
+- The popup pool is a HARD CEILING, allocated once. A spawn that finds nothing
+  free retires the oldest rather than growing.
+- Popups sit BELOW the HUD in the stacking order and are placed at random
+  inside a band that already misses the Wins counter, the rail and the level
+  bar - so even a mis-tuned band cannot cover a figure the player must read.
+  A placement that lands on one still on screen is re-rolled.
+- `run.png` is used at its real aspect ratio: the CSS drives the icon's HEIGHT
+  and leaves the width automatic. Setting both is how an icon gets squashed.
+- **Every menu must be reachable with a mouse.** Pointer lock hides the cursor,
+  every panel opens from a rail tile, and a button you can neither see nor
+  click is not a menu - so `MouseLook.cursorFree` is a real state: Escape hands
+  the cursor back and KEEPS it back, and one click on the world resumes play.
+  Losing the lock used to be treated as an accident and reversed on the next
+  keystroke, which trapped desktop players outside their own shops.
+- `setSuppressed(false)` is called EVERY FRAME that no panel is open, so
+  anything unconditional in it runs sixty times a second. Taking the lock back
+  there is what put the cursor away one frame after Escape handed it over; it
+  now acts only on a real close.
+- There are keys as well as tiles - R for Rebirth, T for Trails, M for mute,
+  Escape to close and free the cursor - and an on-screen hint that says so,
+  driven by the same class `MouseLook` sets so it cannot contradict the input
+  state.
+
+## The scoreboard
+
+Three world-space boards on the BACK WALL of the arena, which is what that wall
+was deliberately left empty for. It stays the only thing there.
+
+- World-space, not HUD, and that is the whole character of it: a thing you walk
+  up to and read, and that another player can be seen reading. A panel pinned
+  to the corner of the screen would be a different feature wearing the same
+  numbers.
+- Every figure is the SERVER's. `LeaderboardService` ranks stored profiles
+  merged with live `PlayerState`, live winning wherever both exist because
+  Speed accrues continuously and is only written out every few seconds. No
+  client is asked for its totals and none could usefully claim any.
+- Rebuilt on a slow timer, not per tick. Sorting every profile twenty times a
+  second to feed a sign on a wall would be the most expensive thing in the
+  room, and nobody reads a leaderboard that fast.
+- The replicated arrays are FIXED-LENGTH and written in place. Clearing and
+  refilling nine rows every rebuild would send the whole board to every client
+  whether or not a place had moved.
+- Players have no names: a handle is DERIVED from the player's id by
+  `handleFor`, deterministically, so the same player is the same name on every
+  board with nothing stored and nothing for a client to assert. The id itself
+  never leaves the server.
+- Panel text is fitted the same way world signs are. A long handle shrinks; the
+  figure beside it never gets pushed off the board.
+
+## Audio
+
+Synthesised, in `client/src/audio/`. There is not one audio file in the build,
+for the same reason there is not one image file: a music track is the single
+easiest way to spend the whole 12 MB budget, and oscillators cost bytes
+measured in hundreds.
+
+- **ONE context, ONE music voice.** The loop is scheduled ahead into Web Audio's
+  own clock on a lookahead timer, and `resume()` is idempotent - there is no
+  path that can start a second copy of the tune, which makes doubled music
+  impossible rather than merely unlikely.
+- **One-shots are bounded twice**: a per-sound cooldown stops an effect
+  retriggering every frame, and a hard voice ceiling stops the mix ever holding
+  more than a dozen. A refused sound is dropped, never queued.
+- **Only the LOCAL player makes noise.** Remote riders are drawn and animated
+  and silent. Eight of them galloping past would bury the one mount whose
+  hoofbeats tell the player anything.
+- Hoofbeat cadence is CLAMPED, exactly as the gait animation's is. A level-80
+  mount covers hundreds of units a second and a beat per stride at that speed
+  is a buzz, not a gallop.
+- Nothing starts before a real user gesture. Browsers refuse to run an
+  AudioContext without one, so every gesture calls `resume()`.
+- `PlayerAudio` decides WHEN a sound is wanted; `AudioManager` knows HOW to
+  make one. No renderer or simulation code has an opinion about audio.
+- Death, level and rebirth sounds fire on the EDGE, never the level: `isDying`
+  stays true for a whole fall-over and a level is re-sent on every patch.
+
+## Deployment
+
+- **Two hosts, and the split is not negotiable.** Netlify serves static files
+  and cannot run a WebSocket server, so the client is deployed there and the
+  Colyseus server runs as a long-lived Node process somewhere else.
+- **`VITE_SERVER_URL` is the ONLY client-side server configuration**, and it is
+  baked in at build time, so changing it means rebuilding. An `http(s)://` URL
+  is converted to `ws(s)://` rather than rejected, because that is the form
+  every host's dashboard hands out.
+- The URL fallback guesses ONLY on localhost. A deployed origin with nothing
+  configured gets an empty endpoint and says so - `wss://the-site/:2568` is an
+  address that can never answer, and pointing a client at one turns a
+  five-second configuration mistake into a network mystery.
+- `NetworkClient` builds its Colyseus `Client` on CONNECT, not in its
+  constructor. Colyseus parses the endpoint eagerly, so building it early made
+  an unconfigured build die with "Invalid URL" while the `Game` was still being
+  assembled, long before anything could report the real cause.
+- **A room holds `MAX_PLAYERS_PER_ROOM` (15).** The matchmaker locks a full
+  room and `joinOrCreate` opens another, so the sixteenth player is ROUTED
+  rather than refused. `onAuth` re-checks capacity at the door, because
+  `maxClients` is enforced at seat RESERVATION and a late-consumed reservation
+  or a direct `joinById` does not go through it.
+- Profiles are a JSON file. On an ephemeral filesystem a redeploy wipes every
+  player's progression unless `ANIMAL_DATA_DIR` points at a mounted volume.
 
 ## Verification
 
@@ -335,6 +524,10 @@ Do not claim something works without running it.
 - `npm run verify` must pass - it checks the generated course for holes,
   overlapping stages and unjumpable gaps, and exercises the server's reward and
   purchase authority INCLUDING the rejection paths.
+- `npm run verify:capacity` needs a RUNNING server, which is why it is not part
+  of `verify`. It connects more clients than one room may hold and asserts both
+  halves of the limit: no room over 15, and the overflow routed rather than
+  turned away.
 - Browser behaviour must be checked in a real browser.
 
 When driving the game from the browser console for a test, note that the window
@@ -347,6 +540,14 @@ harness has to re-assert them each frame.
   wall, open ground through the middle, the training deck on the RIGHT, and a
   deliberately EMPTY back wall. The back stays clean; it is not a third feature
   area.
+- The three treadmills are IDENTICAL and stand in a row along Z on the training
+  deck, with their belts running along X and their consoles at the +X end - so
+  a runner on one faces back into the arena. Building the belt along Z instead
+  is what made the first version read as a row of beds. Each machine is a deck,
+  a belt, two raised side rails, a roller cowl at the back, and a console of two
+  uprights, a panel, a screen and two handles reaching back toward the runner.
+  The belt is DARK with bright travelling chevrons; a belt the same green as the
+  floor reads as a hole in the frame.
 - Then eight stages. 1-5 are authored by hand because each has its own
   mechanic; 6-8 are generated from the pattern vocabulary, which is what proves
   the architecture extends.
@@ -362,7 +563,28 @@ harness has to re-assert them each frame.
      a route however the cycles line up.
   4. **Hidden Grove** - real planks among tree canopies that only look like
      them. The tell is a material one, so it is readable if the player looks.
-  5. **Ancient Ruins** - open ground, blocky arches for cover, and the elephant.
+  5. **Ancient Ruins** - a wide ARENA (108 x 250, comparable to the lobby),
+     staggered rows of blocky arches for cover, fallen blocks between them, and
+     the elephant. The elephant charges and leashes, and a corridor it can plug
+     end to end is not a chase, it is a wall. `ELEPHANT`'s territory is DERIVED
+     from `RUINS_ARENA` rather than written out, so the two cannot disagree
+     about where the beast may go.
+- Then fifteen more, each with ONE idea, and each built from the primitives the
+  first five established - a floor, a box, an orbiting hazard, a falling
+  hazard, a platform that sinks, a pit that kills, ground that handles
+  differently:
+  6 Moving Logs, 7 Ice Run, 8 Falling Rocks, 9 Lava Steppers,
+  10 Spinning Arena, 11 Wind Tunnel, 12 Crusher Hall, 13 Vanishing Bridge,
+  14 Giant Hammers, 15 Forest Run, 16 Waterfall Cliffs, 17 Tornado Arena,
+  18 Ancient Temple, 19 Chaos Run, 20 Final Arena.
+- An orbiting hazard reaches `|centre| + radius + ball` on the FAR side of its
+  circle, and that total has to fit the arena it turns in. Half the arms in
+  stages 10-20 were first authored with their hubs against the wall, which put
+  the head through it for half of every turn; `verify-course` checks this
+  against the corridor width at the hazard's own Z.
+- Lethal moving things are LAVENDER, all of them. A colour is a promise in this
+  game, and stage 6 was first built with log-brown arms turning over a log-brown
+  floor - invisible until they had already hit.
 - The world has a REAL bottom: a pit floor under everything, with the death
   plane well above it. A fall into a pit whose bottom is visible reads as a pit;
   an infinite void reads as an unfinished map. Do not "fix" a void by hiding it
@@ -373,11 +595,12 @@ harness has to re-assert them each frame.
 
 ## Current milestone
 
-Milestone 2 is complete: the reboot ladder, trails, the training area and its
-three treadmills, the new HUD (Wins, Reboot, Trails), right-hand win pads that
-award and return, the revamped arena, five authored stages plus three generated
-ones, the elephant, the pit floor and the blocky sky.
+Milestone 4 is complete: checkpoints are gone and every death returns to the
+one spawn, the prestige ladder is called Rebirth throughout, the obby runs to
+TWENTY authored stages on a data-driven difficulty ladder, there is a
+synthesised audio system, every menu is reachable with a mouse, and three
+server-authoritative leaderboards stand on the arena's back wall.
 
 **Not built yet, and out of scope until the milestone advances:** powers, the
-free-reward chest, audio, the Robux/Bux purchase path, leaderboards, the
-buy-Speed buttons and the "2x Wins" gamepass.
+free-reward chest, the Robux/Bux purchase path, the buy-Speed buttons and the
+"2x Wins" gamepass.

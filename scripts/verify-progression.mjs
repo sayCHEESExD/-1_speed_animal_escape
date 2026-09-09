@@ -15,13 +15,14 @@ import {
   STAND_ROW,
   TRAIL_TIERS,
   animalForSlot,
-  nextRebootTier,
+  nextRebirthTier,
   resolveLevel,
+  resolveMovementProfile,
   standZ,
 } from '../shared/dist/index.js';
 import { StageService } from '../server/dist/progression/StageService.js';
 import { AnimalService } from '../server/dist/progression/AnimalService.js';
-import { RebootService } from '../server/dist/progression/RebootService.js';
+import { RebirthService } from '../server/dist/progression/RebirthService.js';
 import { SpeedService } from '../server/dist/progression/SpeedService.js';
 import { TrailService } from '../server/dist/progression/TrailService.js';
 import { PlayerState } from '../server/dist/rooms/state/PlayerState.js';
@@ -97,19 +98,19 @@ console.log('stage rewards');
   check('stage rewards are 1/3/8/20/50/120/200/400', rewardsOk, true);
 }
 
-console.log('reboot');
+console.log('rebirth');
 {
   const speeds = new SpeedService();
   const animals = new AnimalService();
-  const reboots = new RebootService();
+  const rebirths = new RebirthService();
   const player = newPlayer(speeds, animals);
-  reboots.sync(player);
+  rebirths.sync(player);
 
-  check('reboot 1 needs level 25', nextRebootTier(0).requiredLevel, 25);
-  check('reboot 2 needs level 50', nextRebootTier(1).requiredLevel, 50);
-  check('level cap is the next reboot requirement', player.maxLevel, 25);
-  check('a level-1 player may not reboot', reboots.isEligible(player), false);
-  check('  and the request is refused', reboots.reboot(player, speeds).ok, false);
+  check('rebirth 1 needs level 25', nextRebirthTier(0).requiredLevel, 25);
+  check('rebirth 2 needs level 50', nextRebirthTier(1).requiredLevel, 50);
+  check('level cap is the next rebirth requirement', player.maxLevel, 25);
+  check('a level-1 player may not rebirth', rebirths.isEligible(player), false);
+  check('  and the request is refused', rebirths.rebirth(player, speeds).ok, false);
 
   // Earn the cap. Wins and animals must survive what follows.
   player.wins = 137;
@@ -117,13 +118,13 @@ console.log('reboot');
   player.totalSpeed = 1e9;
   speeds.syncDerived(player);
   check('capped at level 25', player.level, 25);
-  check('now eligible', reboots.isEligible(player), true);
+  check('now eligible', rebirths.isEligible(player), true);
 
-  const done = reboots.reboot(player, speeds);
-  check('reboot is granted', done.ok, true);
+  const done = rebirths.rebirth(player, speeds);
+  check('rebirth is granted', done.ok, true);
   check('  level reset to 1', player.level, 1);
   check('  Speed reset to 0', player.totalSpeed, 0);
-  check('  reboot count is 1', player.rebirths, 1);
+  check('  rebirth count is 1', player.rebirths, 1);
   check('  cap raised to 50', player.maxLevel, 50);
   check('  Speed multiplier is x2', player.moveMultiplier, 2);
   check('  Wins survived', player.wins, 137);
@@ -262,12 +263,22 @@ console.log('speed and levels');
   check('453.6K Speed resolves to level 52', at52.level, 52);
 
   // Movement speed rises with level through the one shared formula. The cap
-  // before any reboot is level 25, so that is where a huge Speed total lands -
-  // getting past it is what the reboot ladder is FOR.
+  // before any rebirth is level 25, so that is where a huge Speed total lands -
+  // getting past it is what the rebirth ladder is FOR.
   player.totalSpeed = 453600;
   speeds.syncDerived(player);
-  check('a huge Speed total caps at the pre-reboot level', player.level, 25);
-  check('level drives the replicated multiplier', player.moveMultiplier > 2, true);
+  check('a huge Speed total caps at the pre-rebirth level', player.level, 25);
+  // The INVARIANT, not a number. The magic 2 that used to be here was a fact
+  // about the linear curve and failed the moment that curve was given the
+  // diminishing returns which keep a late-game mount landable. What actually
+  // has to be true is that levelling makes you faster and keeps making you
+  // faster - which is checkable without hard-coding how much.
+  const atLevel1 = resolveMovementProfile(1, 0, 1, 1).multiplier;
+  const atCap = resolveMovementProfile(25, 0, 1, 1).multiplier;
+  const higher = resolveMovementProfile(60, 0, 1, 1).multiplier;
+  check('level drives the replicated multiplier', player.moveMultiplier > atLevel1, true);
+  check('  and it is the level cap that is driving it', player.moveMultiplier, atCap);
+  check('  and a higher level is still faster', higher > atCap, true);
   check('  and the animal is still the starter', player.animalSlot, 1);
   check('  speedPerStep matches the equipped animal', player.speedPerStep, animalForSlot(1).speedPerStep);
 }

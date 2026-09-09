@@ -1,4 +1,4 @@
-import { rebootMultiplier } from './reboot.js';
+import { rebirthMultiplier } from './rebirth.js';
 
 /**
  * Movement tuning for a RIDDEN ANIMAL.
@@ -68,7 +68,7 @@ export const MOVEMENT: MovementConfig = {
 };
 
 /**
- * How level, reboots, the animal and the equipped trail combine into ONE
+ * How level, rebirths, the animal and the equipped trail combine into ONE
  * movement profile.
  *
  * This is the single evaluator: nothing else may compute a movement speed.
@@ -87,24 +87,43 @@ export interface MovementProfile {
 }
 
 /** Speed added per level, as a fraction of the base. */
-const SPEED_PER_LEVEL = 0.055;
+const SPEED_PER_LEVEL = 0.04;
+
+/**
+ * Levels over which the per-level gain decays to half its value.
+ *
+ * The level term used to be LINEAR, and that is what made the mount
+ * unmanageable: every level added the same slab of speed for ever, so a
+ * mid-game player at level 40 with one rebirth was already doing 150 units a
+ * second and the end of the ladder was over 600 - far past the point where a
+ * platform can be seen, judged and landed on.
+ *
+ * Now it tapers: `steps / (1 + steps / LEVEL_SOFT_CAP)` rises quickly at
+ * first, so the first twenty levels still feel like getting faster, and
+ * converges on `SPEED_PER_LEVEL * LEVEL_SOFT_CAP` - a level ceiling of x2
+ * however long anyone grinds.
+ *
+ * Levelling is therefore no longer where late-game speed comes from. REBIRTH
+ * is, which is what the prestige ladder is for and why it is untouched here.
+ */
+const LEVEL_SOFT_CAP = 25;
 
 /**
  * Resolve the profile a player actually moves at.
  *
  * THE single evaluator. Every modifier in the game is a FACTOR fed through
- * here - the equipped animal, the equipped trail, the reboot ladder - and none
+ * here - the equipped animal, the equipped trail, the rebirth ladder - and none
  * of them is ever a second formula somewhere else.
  *
  * @param level        current level, 1-based
- * @param reboots      completed reboot count
+ * @param rebirths      completed rebirth count
  * @param animalMove   the equipped animal's `moveBonus`
  * @param animalJump   the equipped animal's `jumpBonus`
  * @param extra        the equipped trail's multiplier, and any future boost
  */
 export const resolveMovementProfile = (
   level: number,
-  reboots: number,
+  rebirths: number,
   animalMove = 1,
   animalJump = 1,
   extra = 1,
@@ -113,9 +132,13 @@ export const resolveMovementProfile = (
   const safe = (value: number): number =>
     Number.isFinite(value) && value > 0 ? value : 1;
 
+  // Diminishing returns, so a very high level is faster than a high one
+  // without being a different game.
+  const levelGain = (steps / (1 + steps / LEVEL_SOFT_CAP)) * SPEED_PER_LEVEL;
+
   const multiplier =
-    (1 + steps * SPEED_PER_LEVEL) *
-    rebootMultiplier(reboots) *
+    (1 + levelGain) *
+    rebirthMultiplier(rebirths) *
     safe(animalMove) *
     safe(extra);
 

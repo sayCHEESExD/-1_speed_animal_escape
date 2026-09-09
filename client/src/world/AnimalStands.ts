@@ -74,7 +74,7 @@ export class AnimalStands {
       model.root.rotation.y = -Math.PI / 2;
       group.add(model.root);
 
-      const sign = new CanvasSign(4.4, 1.8, [
+      const sign = new CanvasSign(9, 3.1, [
         {
           text: `+${formatSpeed(animal.speedPerStep)} Speed`,
           size: 1,
@@ -91,7 +91,7 @@ export class AnimalStands {
           stroke: '#40320c',
         },
       ]);
-      sign.mesh.position.set(0, STAND_ROW.height + model.height + 1.1, 0);
+      sign.mesh.position.set(0, STAND_ROW.height + model.height + 1.5, 0);
       sign.mesh.rotation.y = -Math.PI / 2;
       group.add(sign.mesh);
 

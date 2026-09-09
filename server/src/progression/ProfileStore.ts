@@ -29,6 +29,17 @@ class ProfileStore {
   }
 
   /**
+   * Every stored profile, id and all.
+   *
+   * For the leaderboard, which has to be able to show players who are not
+   * currently connected - a board that emptied when the server did would say
+   * nothing about anybody's progress.
+   */
+  entries(): IterableIterator<[string, StoredProfile]> {
+    return this.profiles.entries();
+  }
+
+  /**
    * Apply a stored profile onto fresh player state.
    *
    * Only the DERIVING facts are restored. Level, movement speed, jump velocity

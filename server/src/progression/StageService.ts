@@ -1,4 +1,4 @@
-import { SPAWN_POSITION, STAGES, winPadAt, type StageDefinition } from '@animal/shared';
+import { STAGES, winPadAt, type StageDefinition } from '@animal/shared';
 import type { PlayerState } from '../rooms/state/PlayerState.js';
 import { wallet } from './Wallet.js';
 
@@ -69,19 +69,5 @@ export class StageService {
     if (stage.index > player.bestStage) player.bestStage = stage.index;
 
     return { granted: true, stage, wins: granted };
-  }
-
-  /**
-   * Where a player who just died belongs.
-   *
-   * The checkpoint of the stage they were in, or the starting arena if they
-   * had not entered one. Owned by the server because a respawn position is a
-   * gameplay decision, not a client preference.
-   */
-  respawnZFor(z: number): number {
-    for (const stage of STAGES) {
-      if (z >= stage.startZ && z <= stage.endZ) return stage.checkpointZ;
-    }
-    return SPAWN_POSITION.z;
   }
 }

@@ -1,4 +1,4 @@
-import { treadmillAt } from '../config/course.js';
+import { surfaceAt, treadmillAt } from '../config/course.js';
 import { MOVEMENT } from '../config/movement.js';
 import { MOUNT_HEIGHT } from '../constants/world.js';
 import { SPAWN_POSITION, SPAWN_ROTATION_Y } from '../constants/world.js';
@@ -72,7 +72,7 @@ export interface MovementInput {
 
 /** Server-owned tuning the step reads but never changes. */
 export interface SimParams {
-  /** Authoritative movement multiplier from level, reboots, animal and trail. */
+  /** Authoritative movement multiplier from level, rebirths, animal and trail. */
   moveMultiplier: number;
   /** Authoritative jump velocity, resolved by the one shared formula. */
   jumpVelocity: number;
@@ -352,11 +352,34 @@ const applyHorizontal = (
   const targetSpeed = base * params.moveMultiplier;
   const control = motion.grounded ? 1 : MOVEMENT.airControl;
 
+  /*
+   * The ground the mount is over, if it is anything other than ordinary.
+   *
+   * Read HERE, inside the shared step, rather than applied as a force by
+   * either side separately: ice and wind change how the controls answer, and a
+   * client whose prediction handled differently from the server's simulation
+   * would spend the whole stage being pulled back to a position it did not
+   * steer to. There is one formula and both sides run it.
+   */
+  const surface = surfaceAt(motion.x, motion.z);
+
+  // Grip scales acceleration and braking TOGETHER. Lowering only the braking
+  // would make ice a place where the mount is harder to stop; lowering both is
+  // what makes it a place where it is harder to steer, which is the mechanic.
+  const grip = surface && motion.grounded ? Math.max(0.05, surface.grip) : 1;
+
+  // Wind acts in the air as well as on the ground - a jump in a crosswind that
+  // went exactly where it was aimed would make the whole stage cosmetic.
+  if (surface) {
+    motion.vx += surface.windX * dt;
+    motion.vz += surface.windZ * dt;
+  }
+
   if (hasInput) {
     // Acceleration scales with the target speed, so reaching top speed takes
     // about the same time at every level. A fixed acceleration would leave a
     // level-80 mount spending several seconds winding up.
-    const accel = MOVEMENT.acceleration * params.moveMultiplier * control * dt;
+    const accel = MOVEMENT.acceleration * params.moveMultiplier * control * grip * dt;
     const rate = Math.min(accel / targetSpeed, 1);
     motion.vx += (dirX * targetSpeed - motion.vx) * rate;
     motion.vz += (dirZ * targetSpeed - motion.vz) * rate;
@@ -364,7 +387,7 @@ const applyHorizontal = (
     const desiredYaw = Math.atan2(dirX, dirZ);
     motion.yaw = rotateTowards(motion.yaw, desiredYaw, MOVEMENT.turnSpeed * dt);
   } else if (motion.grounded) {
-    const drop = MOVEMENT.deceleration * params.moveMultiplier * dt;
+    const drop = MOVEMENT.deceleration * params.moveMultiplier * grip * dt;
     const speed = horizontalSpeed(motion);
     // The speed guard matters independently of `drop`: dividing by a zero
     // speed would yield Infinity, and 0 * Infinity is NaN.

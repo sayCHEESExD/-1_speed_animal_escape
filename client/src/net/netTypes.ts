@@ -53,11 +53,32 @@ export interface NetElephantState {
   charging: boolean;
 }
 
+/** One row of one leaderboard, exactly as the server ranked it. */
+export interface NetLeaderEntry {
+  handle: string;
+  value: number;
+}
+
+/** The three boards on the spawn wall. Read-only, and entirely the server's. */
+export interface NetLeaderboardState {
+  wins: ArrayLike<NetLeaderEntry>;
+  speed: ArrayLike<NetLeaderEntry>;
+  rebirths: ArrayLike<NetLeaderEntry>;
+}
+
 export interface NetCourseState {
   players: MapSchema<NetPlayerState>;
   /** The clock the moving hazards are a pure function of. */
   elapsed: number;
   elephant: NetElephantState;
+  leaderboard: NetLeaderboardState;
+}
+
+/** A leaderboard flattened into plain data, ready to draw. */
+export interface LeaderboardSnapshot {
+  wins: readonly NetLeaderEntry[];
+  speed: readonly NetLeaderEntry[];
+  rebirths: readonly NetLeaderEntry[];
 }
 
 /** Connection lifecycle, surfaced to the UI. */

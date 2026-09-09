@@ -50,6 +50,27 @@ const ARRIVE_DURATION = 0.16;
 const RESPAWN_ACK_TIMEOUT = 1.5;
 
 /**
+ * Seconds a finished death waits for a placement before asking again.
+ *
+ * The bug this exists to close: a death here is a PREDICTION, and the freeze
+ * it starts is only ever lifted by an authoritative placement. When the server
+ * disagreed - the client thought it had clipped a hazard, the server's own
+ * simulation had it land safely - no `Respawn` was ever sent, nothing reset
+ * `deathTime`, and the mount sat at the end of its fall-over animation for
+ * ever with no way back.
+ *
+ * The barrier already had a timeout, but that only let RECONCILIATION resume;
+ * the death freeze itself had no terminal state at all, so the player stayed
+ * frozen while their position was quietly corrected underneath them.
+ *
+ * So a stuck death now asks. The server is still the only thing that places
+ * anyone - it answers `RequestRespawn` by putting them at the spawn, exactly
+ * as any other death does - and the ask repeats until it is answered, which is
+ * what makes completing the flow a guarantee rather than a hope.
+ */
+const RESPAWN_NUDGE_INTERVAL = 0.75;
+
+/**
  * Position error above which prediction snaps instead of easing.
  *
  * Small corrections are blended into the render position so ordinary
@@ -186,6 +207,14 @@ export class LocalPlayer {
   private awaitingRespawn = false;
   private respawnWait = 0;
 
+  /**
+   * Seconds since the death animation finished with nobody placing us.
+   *
+   * -1 while there is nothing to wait for. Counts only AFTER the animation is
+   * over, so a slow connection is never nagged mid-fall.
+   */
+  private stuckTime = -1;
+
   /** Steering this frame, for the animal's head turn. */
   private turnSignal = 0;
 
@@ -312,6 +341,8 @@ export class LocalPlayer {
     this.correction.set(0, 0, 0);
     this.placement = 'respawn';
     this.deathTime = -1;
+    // Placed. Whatever the death was waiting for has happened.
+    this.stuckTime = -1;
     this.arriveTime = 0;
     this.mount.resetAnimation();
     this.mount.setVisualScale(0.15, 0.15, 0.15);
@@ -334,6 +365,7 @@ export class LocalPlayer {
     this.arriveTime = -1;
     this.awaitingRespawn = true;
     this.respawnWait = 0;
+    this.stuckTime = -1;
     this.pending.length = 0;
     this.outgoing.length = 0;
     this.correction.set(0, 0, 0);
@@ -351,6 +383,20 @@ export class LocalPlayer {
   /** True once the death has run its course and the player may be placed. */
   get deathComplete(): boolean {
     return this.deathTime >= DEATH.duration;
+  }
+
+  /**
+   * True when this death has been waiting too long to be placed.
+   *
+   * CONSUMES the wait, so a caller that asks every frame sends one request per
+   * interval rather than one per frame. Returning it rather than sending
+   * anything keeps this class free of the network, which is the same reason
+   * the death prediction does not decide the respawn either.
+   */
+  consumeRespawnNudge(): boolean {
+    if (this.stuckTime < RESPAWN_NUDGE_INTERVAL) return false;
+    this.stuckTime = 0;
+    return true;
   }
 
   /**
@@ -463,6 +509,11 @@ export class LocalPlayer {
       // Frozen. No step, no steering emitted, no gravity - the old state
       // cannot advance and nothing the player presses can move a dead mount.
       this.deathTime += delta;
+      // Only once the fall-over has actually finished: until then there is
+      // nothing wrong, just an animation playing.
+      if (this.deathTime >= DEATH.duration) {
+        this.stuckTime = this.stuckTime < 0 ? 0 : this.stuckTime + delta;
+      }
       // The LOCAL simulation is frozen, but the server's must not be: it
       // advances only by the inputs it receives, and a FALL is confirmed by
       // the server watching its own player cross the death plane. Going silent

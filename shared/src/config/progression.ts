@@ -1,13 +1,13 @@
-import { maxLevelForReboot, nextRebootTier, rebootMultiplier } from './reboot.js';
+import { maxLevelForRebirth, nextRebirthTier, rebirthMultiplier } from './rebirth.js';
 
 /**
- * Progression tuning. Level, Speed, Wins, reboots, trails and the owned-animal
+ * Progression tuning. Level, Speed, Wins, rebirths, trails and the owned-animal
  * set are all SERVER-AUTHORITATIVE; the client may predict for UI feel but
  * never decides any of them.
  *
- * The level cap is NOT a constant here - it is whatever the next reboot
- * requires, so reaching the cap and unlocking a reboot are the same moment.
- * See `config/reboot.ts`.
+ * The level cap is NOT a constant here - it is whatever the next rebirth
+ * requires, so reaching the cap and unlocking a rebirth are the same moment.
+ * See `config/rebirth.ts`.
  */
 
 /**
@@ -19,14 +19,14 @@ import { maxLevelForReboot, nextRebootTier, rebootMultiplier } from './reboot.js
  */
 export const MAX_WINS = 4294967295;
 
-/** Level cap before any reboot. Derived, so the two can never disagree. */
-export const BASE_LEVEL_CAP = nextRebootTier(0).requiredLevel;
+/** Level cap before any rebirth. Derived, so the two can never disagree. */
+export const BASE_LEVEL_CAP = nextRebirthTier(0).requiredLevel;
 
 /**
  * Re-exported under the names the rest of the codebase already uses.
  *
- * The reboot module owns the ladder; these exist so a caller needs one import
+ * The rebirth module owns the ladder; these exist so a caller needs one import
  * for "what is this player's cap" rather than knowing which file the ladder
  * happens to live in.
  */
-export { maxLevelForReboot as maxLevelForRebirth, rebootMultiplier };
+export { maxLevelForRebirth as maxLevelForRebirth, rebirthMultiplier };

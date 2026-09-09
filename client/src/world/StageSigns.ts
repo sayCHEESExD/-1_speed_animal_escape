@@ -1,4 +1,4 @@
-import { COURSE, STAGES } from '@animal/shared';
+import { COURSE, STAGES, formatSpeed } from '@animal/shared';
 import { Group } from 'three';
 import { CanvasSign } from './CanvasSign.js';
 
@@ -17,7 +17,7 @@ export class StageSigns {
 
   constructor() {
     for (const stage of STAGES) {
-      const sign = new CanvasSign(30, 12, [
+      const sign = new CanvasSign(44, 15, [
         {
           text: `STAGE ${stage.index}`,
           size: 1.5,
@@ -32,10 +32,20 @@ export class StageSigns {
           stroke: '#1c5c24',
         },
         {
+          // BOTH figures, because a level means nothing to a player looking at
+          // a Speed counter. The Speed is derived from the level through the
+          // curve the player actually levels on, so the two lines here can
+          // never advertise different things.
           text: `Recommended Level: ${stage.recommendedLevel}`,
           size: 0.55,
           fill: '#ffffff',
           stroke: '#22331f',
+        },
+        {
+          text: `${formatSpeed(stage.recommendedSpeed)} Speed`,
+          size: 0.5,
+          fill: '#ffe14d',
+          stroke: '#3a2a06',
         },
       ]);
 

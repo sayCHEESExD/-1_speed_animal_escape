@@ -54,6 +54,17 @@ export class RailButton {
   }
 
   /**
+   * Fire this tile exactly as a click would.
+   *
+   * The keyboard shortcuts go through here rather than calling the underlying
+   * action, so a key and a click are literally the same code path - including
+   * the tile's own focus and active styling, which a direct call would skip.
+   */
+  press(): void {
+    this.root.click();
+  }
+
+  /**
    * @param ready   show the badge - something can be done right now
    * @param locked  dim the tile - nothing can be done yet
    */

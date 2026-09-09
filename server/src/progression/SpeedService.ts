@@ -58,7 +58,7 @@ export class SpeedService {
   /**
    * Drop the movement baseline.
    *
-   * Called on every respawn: the teleport back to a checkpoint is a huge
+   * Called on every respawn: the teleport back to the arena is a huge
    * position delta that must never be credited as distance travelled.
    */
   reset(sessionId: string, player: PlayerState): void {
@@ -162,7 +162,7 @@ export class SpeedService {
   /**
    * THE player's movement profile.
    *
-   * Level, the reboot ladder, the equipped animal AND the equipped trail all
+   * Level, the rebirth ladder, the equipped animal AND the equipped trail all
    * drive it, and every caller that needs a speed - the replicated multiplier,
    * the anti-teleport step cap - goes through here. What the player moves at
    * and what the server will credit therefore cannot disagree.

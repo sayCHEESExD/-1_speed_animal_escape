@@ -94,6 +94,21 @@ export class MouseLook {
    */
   private pendingLock = false;
 
+  /**
+   * The player asked for their cursor, and may keep it.
+   *
+   * The state this game used not to have, and the absence of which was the
+   * whole bug: pointer lock hides the cursor, every panel opens from a rail
+   * button, and a button you cannot see or click is not a menu. Escape used to
+   * be treated as an accident and reversed, which left a mouse-and-keyboard
+   * player permanently captured with no way into their own shops.
+   *
+   * So Escape is now a REQUEST, and it is honoured until the player says
+   * otherwise by clicking the world. A panel closing still takes the lock
+   * back, because closing a menu is that same "otherwise".
+   */
+  private cursorFree = false;
+
   get yaw(): number {
     return this.yawValue;
   }
@@ -105,6 +120,30 @@ export class MouseLook {
   /** True while the browser has the pointer captured. */
   get locked(): boolean {
     return !!this.canvas && document.pointerLockElement === this.canvas;
+  }
+
+  /** True while the player has their cursor and the HUD is clickable. */
+  get isCursorFree(): boolean {
+    return this.cursorFree || this.suppressed;
+  }
+
+  /**
+   * Hand the cursor back, or take it again.
+   *
+   * The one entry point for the state, so the Escape key, a click on the world
+   * and any future settings toggle cannot each keep their own idea of it.
+   */
+  setCursorFree(free: boolean): void {
+    if (this.cursorFree === free) return;
+    this.cursorFree = free;
+    if (free) {
+      this.dragging = false;
+      this.pendingLock = false;
+      if (this.locked) document.exitPointerLock();
+    } else if (this.armed && !this.suppressed) {
+      this.requestLock();
+    }
+    this.applyCursor();
   }
 
   /**
@@ -161,11 +200,22 @@ export class MouseLook {
       return;
     }
 
-    // The panel closed. Take the lock straight back so the camera resumes
-    // without the player having to click the world first - closing a menu IS
-    // the request to go back to playing. If the browser refuses, `pendingLock`
-    // keeps the request alive; it is cleared the moment the lock arrives.
-    if (wasSuppressed && this.armed) {
+    /*
+     * A panel CLOSED. Not merely "no panel is open".
+     *
+     * The input layer calls this every single frame that nothing is up, so
+     * anything unconditional here runs sixty times a second. Taking the lock
+     * back on that basis put the cursor away one frame after Escape handed it
+     * over - which is the exact behaviour `cursorFree` exists to remove.
+     *
+     * On a real close, the lock IS taken straight back: closing a menu is the
+     * player saying they want to play on, so they should not also have to
+     * click the world. If the browser refuses during its post-Escape cooldown,
+     * `pendingLock` keeps the request alive until a gesture can pay it off.
+     */
+    if (!wasSuppressed) return;
+    this.cursorFree = false;
+    if (this.armed) {
       this.pendingLock = true;
       this.requestLock();
     }
@@ -220,13 +270,16 @@ export class MouseLook {
    */
   private readonly onFirstGesture = (event: KeyboardEvent): void => {
     // Escape can never carry the activation a lock needs, so it is not the
-    // keystroke that restores one - it only ever loses it. The debt it leaves
-    // behind is settled by the next key that does count.
+    // keystroke that restores one - it only ever loses it.
     if (event.key === 'Escape') return;
     if (!this.armed) {
       this.engage();
       return;
     }
+    // The cursor is out because the player asked for it. Typing does not
+    // cancel that - only clicking the world does - or every keystroke aimed at
+    // the game would snatch back a cursor aimed at a button.
+    if (this.cursorFree) return;
     // A re-lock the browser refused during a panel close, paid off by the
     // first keystroke that DOES carry user activation.
     if (this.pendingLock && !this.locked && !this.suppressed) this.requestLock();
@@ -236,6 +289,10 @@ export class MouseLook {
   private readonly onMouseDown = (event: MouseEvent): void => {
     if (this.suppressed || event.button !== 0) return;
     this.armed = true;
+    // Bound to the CANVAS, so this only ever hears clicks on the game world -
+    // every panel and button is DOM above it and stops the event first. A
+    // click on the world is the player saying they are done with the cursor.
+    this.cursorFree = false;
     if (this.locked) return;
 
     // Only where the lock is refused outright does holding the button steer;
@@ -262,16 +319,19 @@ export class MouseLook {
     }
 
     this.dragging = false;
-    // Lost the lock with no panel up. Nothing in the game asks for that, so it
-    // came from Escape, an alt-tab or the browser itself - all of which are
-    // reversed rather than accepted, because a cursor over the HUD is not a
-    // state this game has. The immediate retry usually fails during the
-    // browser's post-Escape cooldown; `pendingLock` is what actually gets it
-    // back, on the next keystroke or click.
-    if (!this.suppressed && this.armed) {
-      this.pendingLock = true;
-      this.requestLock();
-    }
+    /*
+     * Lost the lock with no panel up.
+     *
+     * That is Escape, an alt-tab, or the browser's own release, and all three
+     * mean the same thing: the player wants their cursor. It used to be
+     * treated as an accident and reversed on the next keystroke, which is what
+     * made the rail buttons unclickable on a desktop - the cursor came back
+     * for a moment and was taken away again before it could reach one.
+     *
+     * Now it is accepted. The camera stops, the cursor appears over the HUD,
+     * and one click on the world resumes play.
+     */
+    if (!this.suppressed && this.armed) this.cursorFree = true;
     this.applyCursor();
   };
 
@@ -284,8 +344,12 @@ export class MouseLook {
    * they have to stay clickable.
    */
   private applyCursor(): void {
-    const hide = this.armed && this.lockEverGranted && !this.suppressed;
+    const hide =
+      this.armed && this.lockEverGranted && !this.suppressed && !this.cursorFree;
     document.body.classList.toggle('aoe-cursor-hidden', hide);
+    // Drives the on-screen hint, so the player is told how to get back into
+    // the game by the same state that decided to let them out of it.
+    document.body.classList.toggle('aoe-cursor-free', this.isCursorFree);
   }
 
   /**
@@ -297,7 +361,7 @@ export class MouseLook {
    * rejection.
    */
   private requestLock(): void {
-    if (!this.canvas || this.locked || this.suppressed) return;
+    if (!this.canvas || this.locked || this.suppressed || this.cursorFree) return;
     const request = this.canvas.requestPointerLock?.() as unknown;
     if (request instanceof Promise) request.catch(() => undefined);
   }

@@ -14,6 +14,19 @@ export const ROOM_NAME = 'animalobby';
  */
 export const DEFAULT_SERVER_PORT = 2568;
 
+/**
+ * Most players in ONE room.
+ *
+ * The matchmaker locks a room at this figure and opens another, so a
+ * sixteenth player gets a new room rather than a refusal - which is what
+ * "routed, not rejected" means here.
+ *
+ * It lives in `shared/` because it is a fact about the world both halves have
+ * to agree on: the server enforces it, and anything the client ever shows
+ * about how full a room is has to be the same number or it is lying.
+ */
+export const MAX_PLAYERS_PER_ROOM = 15;
+
 /** Server simulation / state broadcast rate, in Hz. */
 export const SERVER_TICK_RATE = 20;
 
@@ -35,18 +48,18 @@ export const MessageType = {
   ClaimStage: 'claimStage',
   /** Client -> server: "I am standing on this animal's stand, claim it." */
   ClaimAnimal: 'claimAnimal',
-  /** Client -> server: "put me back at my checkpoint". */
+  /** Client -> server: "put me back at the starting arena". */
   RequestRespawn: 'requestRespawn',
   /** Server -> client: a stage reward was granted. Drives the celebration. */
   StageAwarded: 'stageAwarded',
   /**
-   * Client -> server: "reboot me".
+   * Client -> server: "rebirth me".
    *
-   * Carries nothing: the server already knows the player's level and reboot
+   * Carries nothing: the server already knows the player's level and rebirth
    * count, and it is the only thing allowed to decide whether the requirement
    * is met.
    */
-  Reboot: 'reboot',
+  Rebirth: 'rebirth',
   /** Client -> server: buy the trail in this slot. */
   BuyTrail: 'buyTrail',
   /** Client -> server: wear an OWNED trail, or 0 to take it off. */

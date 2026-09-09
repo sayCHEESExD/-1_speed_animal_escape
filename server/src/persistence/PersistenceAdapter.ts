@@ -12,7 +12,7 @@ export interface StoredProfile {
   wins: number;
   /** Bitmask of animals claimed. The equipped one is the best of these. */
   ownedAnimals: number;
-  /** Reboots performed. */
+  /** Rebirths performed. */
   rebirths: number;
   /** Bitmask of trails bought, and the one worn. Permanent unlocks. */
   ownedTrails: number;

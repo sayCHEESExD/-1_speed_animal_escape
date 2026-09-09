@@ -1,6 +1,7 @@
 import {
   CanvasTexture,
   FrontSide,
+  LinearFilter,
   Mesh,
   MeshBasicMaterial,
   PlaneGeometry,
@@ -10,7 +11,7 @@ import {
 /** One line of text on a sign. */
 export interface SignLine {
   readonly text: string;
-  /** Fraction of the canvas height this line's font fills. */
+  /** Relative share of the panel's height this line takes. */
   readonly size: number;
   readonly fill: string;
   /** Outline colour. The chunky dark rim every label in the reference has. */
@@ -23,10 +24,10 @@ export interface SignLine {
  * A floating text panel, drawn on a canvas.
  *
  * All of this game's world text - the stage gates, the "+N Speed" over each
- * animal stand - is one of these. Canvas rather than an SVG or a font file
- * because the style is a heavy stroked display face that a browser can draw
- * directly, and because a font file would be the single largest asset in a
- * build that currently has none.
+ * treadmill, the price over each animal stand, the TRAINING title - is one of
+ * these. Canvas rather than a font file because the style is a heavy stroked
+ * display face a browser can draw directly, and because a font file would be
+ * the single largest asset in a build that otherwise has almost none.
  *
  * Unlit on purpose: a sign that dims when it faces away from the sun is a sign
  * the player cannot read.
@@ -44,7 +45,9 @@ export class CanvasSign {
    * @param lines  what to draw, top to bottom
    */
   constructor(width: number, height: number, lines: readonly SignLine[]) {
-    const pixelsPerUnit = 48;
+    // Enough resolution that a small label is still crisp up close. The canvas
+    // is thrown away after upload, so this costs texture memory only.
+    const pixelsPerUnit = 64;
     const canvas = document.createElement('canvas');
     canvas.width = Math.max(2, Math.round(width * pixelsPerUnit));
     canvas.height = Math.max(2, Math.round(height * pixelsPerUnit));
@@ -54,15 +57,18 @@ export class CanvasSign {
 
     this.texture = new CanvasTexture(canvas);
     this.texture.colorSpace = SRGBColorSpace;
-    this.texture.anisotropy = 4;
+    this.texture.anisotropy = 8;
+    // No mipmaps: a sign is nearly always seen at a shallow angle from a
+    // distance, and the blurred chain is what makes small labels mush.
+    this.texture.generateMipmaps = false;
+    this.texture.minFilter = LinearFilter;
 
     this.geometry = new PlaneGeometry(width, height);
     this.material = new MeshBasicMaterial({
       map: this.texture,
       transparent: true,
       // Single-sided. A double-sided panel is legible from the front and
-      // MIRRORED from behind, which is worse than not being there at all -
-      // every stage gate read backwards the moment a player turned round.
+      // MIRRORED from behind, which is worse than not being there at all.
       side: FrontSide,
       depthWrite: false,
     });
@@ -78,6 +84,24 @@ export class CanvasSign {
   }
 }
 
+const FONT = '"Arial Black", "Segoe UI", system-ui, sans-serif';
+
+/**
+ * Draw the lines, sized to FIT.
+ *
+ * The bug this exists to prevent: sizing a line from its height band alone and
+ * then drawing it centred. Nothing measured the result against the panel's
+ * WIDTH, so any long string - "TRAINING", "60.0K Wins Required", "+3 Speed" on
+ * a narrow label - simply ran off both ends of the canvas and was clipped by
+ * the texture edge. The stroke made it worse: `strokeText` paints half a line
+ * width OUTSIDE the glyphs, so even text that technically fitted lost the
+ * outline on its first and last characters.
+ *
+ * So: reserve padding for the stroke, measure, and shrink until it fits. The
+ * panels themselves are also authored wide enough that the shrink rarely has
+ * to do anything - the fix is not "make the text small", it is "never let the
+ * text exceed the space it was given".
+ */
 const drawLines = (
   ctx: CanvasRenderingContext2D,
   width: number,
@@ -90,19 +114,32 @@ const drawLines = (
   ctx.lineJoin = 'round';
   ctx.miterLimit = 2;
 
-  // Lines are laid out by their own heights, so a big title and a small
-  // subtitle share the panel proportionally rather than by a fixed grid.
+  // Lines share the panel by their own heights, so a big title and a small
+  // subtitle divide it proportionally rather than by a fixed grid.
   const total = lines.reduce((sum, line) => sum + line.size, 0) || 1;
   let cursor = 0;
 
   for (const line of lines) {
     const band = (line.size / total) * height;
-    const fontSize = band * 0.82;
+    const strokeRatio = line.strokeWidth ?? 0.16;
     const centreY = cursor + band / 2;
     cursor += band;
+    if (!line.text) continue;
 
-    ctx.font = `900 ${fontSize}px "Arial Black", "Segoe UI", system-ui, sans-serif`;
-    ctx.lineWidth = fontSize * (line.strokeWidth ?? 0.16);
+    let fontSize = band * 0.8;
+
+    // Converge on a size whose glyphs AND outline sit inside the panel. Four
+    // passes is plenty: each one scales by the exact overflow ratio.
+    for (let pass = 0; pass < 4; pass += 1) {
+      ctx.font = `900 ${fontSize}px ${FONT}`;
+      const drawn = ctx.measureText(line.text).width + fontSize * strokeRatio;
+      const room = width * 0.94;
+      if (drawn <= room) break;
+      fontSize *= room / drawn;
+    }
+
+    ctx.font = `900 ${fontSize}px ${FONT}`;
+    ctx.lineWidth = fontSize * strokeRatio;
     ctx.strokeStyle = line.stroke;
     ctx.strokeText(line.text, width / 2, centreY);
     ctx.fillStyle = line.fill;

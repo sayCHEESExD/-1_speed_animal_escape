@@ -73,10 +73,75 @@ export const PALETTE = {
   deckDark: '#633b28',
   treadmillFrame: 0xf6c343,
   treadmillFrameDark: 0xc9971f,
-  treadmillBelt: 0x4ade5a,
+  /*
+   * The belt is DARK, and deliberately so. A belt the same green as the lobby
+   * floor reads as a hole in the frame from the front, which is half of why
+   * the first machines looked like platforms. Dark rubber under a gold frame,
+   * with bright chevrons travelling over it, is what makes it a treadmill.
+   */
+  treadmillBelt: 0x2b3a33,
+  /** The console screen: dark, so the gold frame reads as machinery. */
+  treadmillScreen: 0x27323d,
 
   /** A platform about to sink flashes toward this. */
   sinkingWarn: 0xff6b4a,
+
+  /* ---- The later stages -------------------------------------------------
+   * Each stage past the ruins gets its own material rather than a recolour of
+   * the corridor, because a twenty-stage run through one green tunnel would
+   * read as one very long stage. They are all the same toy-brick treatment:
+   * flat colour, a drawn texture, no PBR anywhere.
+   */
+
+  /** Ice: pale blue with a brighter frost. Stage 7. */
+  ice: '#a9dcf2',
+  iceStud: '#d5f1fb',
+
+  /** Cold grey rock: cliffs, temple masonry, the stones over the lava. */
+  stone: '#9aa4ad',
+  stoneDark: '#7d868f',
+
+  /** Felled logs, a warmer brown than the plank bridges. */
+  log: '#8a5a34',
+  logDark: '#6f4726',
+
+  /** Painted machinery: crusher frames, hammer hubs, wind-tunnel posts. */
+  metal: 0xc2c9d2,
+  metalDark: 0x8b939d,
+
+  /** Lava. Bright, and the one thing in the world that emits light. */
+  lava: '#ff6a1e',
+  lavaDark: '#c02f08',
+  /** Water, at the bottom of the cliffs. */
+  water: '#3f9fe0',
+  waterDark: '#2b78b4',
+
+  /** Boulders, and the rocks that fall out of the sky. */
+  rock: 0x8d8577,
+  rockDark: 0x6f6a5f,
+
+  /** A torch flame, and the tornado funnels. */
+  flame: 0xffb32e,
+  tornado: 0xcfd8e4,
+
+  /** The warning patch under something that is about to land on you. */
+  impactWarn: 0x2a2f36,
+
+  /* ---- The scoreboards on the spawn wall --------------------------------
+   * Lavender masonry around a pale panel, as in the reference art. The board
+   * is meant to read as part of the room rather than as a screen hung in it,
+   * so the frame is the same family of stone the ruins are built from.
+   */
+  boardFrame: 0xb0a8d4,
+  boardFrameDark: 0x8e86b4,
+  boardPanel: '#cfd0ea',
+  boardPanelEdge: '#a9a8ce',
+  boardStripe: 'rgba(255, 255, 255, 0.28)',
+  /** Dark ink for the header and every outline on the board. */
+  boardInk: '#2b2740',
+  boardHeading: '#3a3457',
+  boardName: '#ffffff',
+  boardValue: '#ffd53d',
 
   /** Sky, and the fog matched to its bright band just above the horizon. */
   sky: 0x63bff5,
