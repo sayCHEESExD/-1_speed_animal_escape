@@ -271,6 +271,7 @@ export const WIN_PAD = {
 const FIRST_STAGE_Z: number = COURSE.lobbyEndZ;
 
 const solids: CourseSolid[] = [];
+const wideAreas: WideArea[] = [];
 const sinking: SinkingSolid[] = [];
 const quicksand: QuicksandRegion[] = [];
 const hazards: CourseHazard[] = [];
@@ -388,23 +389,30 @@ export const standZ = (slot: number): number =>
  */
 export const TRAINING = {
   /** Raised wooden deck footprint, on the player's RIGHT - which is -X. */
-  minX: -54,
-  maxX: -22,
-  minZ: -86,
-  maxZ: -30,
+  minX: -56,
+  maxX: -20,
+  minZ: -92,
+  maxZ: -26,
   /** Deck top. A shallow step, inside the simulation's landing tolerance. */
   deckY: 0.6,
 
-  /** Belt footprint. */
-  beltWidth: 7,
-  beltLength: 13,
+  /**
+   * Belt footprint.
+   *
+   * The belt runs along X, NOT along Z. A treadmill faces the way its runner
+   * does, and the runner is meant to face the spawn point in the middle of the
+   * arena - which from the deck on the left wall is +X. The three machines are
+   * then spaced along Z, standing in a row against the wall.
+   */
+  beltLength: 17,
+  beltWidth: 9,
   /** Walkable height of a belt above the deck. */
   beltHeight: 0.5,
-  /** X of the first belt, and the spacing between them. */
-  firstX: -48,
-  spacingX: 10,
-  /** Z of the belt centres. */
-  centerZ: -58,
+  /** X of every belt's centre. They all face the same way. */
+  centerX: -40,
+  /** Z of the first belt, and the spacing down the row. */
+  firstZ: -76,
+  spacingZ: 17,
   /** How many belts. All identical. */
   count: 3,
 
@@ -424,9 +432,9 @@ export const TRAINING = {
   beltSpeed: 26,
 } as const;
 
-/** Centre X of a 1-based treadmill index. */
-export const treadmillX = (index: number): number =>
-  TRAINING.firstX + (Math.floor(index) - 1) * TRAINING.spacingX;
+/** Centre Z of a 1-based treadmill index. They share one X. */
+export const treadmillZ = (index: number): number =>
+  TRAINING.firstZ + (Math.floor(index) - 1) * TRAINING.spacingZ;
 
 /** Walkable height of every treadmill belt. */
 export const TREADMILL_BELT_Y = TRAINING.deckY + TRAINING.beltHeight;
@@ -443,9 +451,10 @@ export const NO_TREADMILL = 0;
  */
 export const treadmillAt = (x: number, y: number, z: number): number => {
   if (y < TREADMILL_BELT_Y - 1.2 || y > TREADMILL_BELT_Y + 3) return NO_TREADMILL;
-  if (Math.abs(z - TRAINING.centerZ) > TRAINING.beltLength / 2) return NO_TREADMILL;
+  // The belt runs along X and the row runs along Z, so the shared axis is X.
+  if (Math.abs(x - TRAINING.centerX) > TRAINING.beltLength / 2) return NO_TREADMILL;
   for (let i = 1; i <= TRAINING.count; i += 1) {
-    if (Math.abs(x - treadmillX(i)) <= TRAINING.beltWidth / 2) return i;
+    if (Math.abs(z - treadmillZ(i)) <= TRAINING.beltWidth / 2) return i;
   }
   return NO_TREADMILL;
 };
@@ -467,12 +476,12 @@ for (let i = 1; i <= TRAINING.count; i += 1) {
   pushBox(
     -1,
     'training',
-    treadmillX(i),
+    TRAINING.centerX,
     TRAINING.deckY,
-    TRAINING.centerZ,
-    TRAINING.beltWidth,
-    TRAINING.beltHeight,
+    treadmillZ(i),
     TRAINING.beltLength,
+    TRAINING.beltHeight,
+    TRAINING.beltWidth,
   );
 }
 
@@ -798,53 +807,105 @@ const buildHiddenGrove = (stage: number, z: number): number => {
  * player and a charging animal.
  */
 const RUINS = {
-  archSpacing: 26,
-  count: 6,
-  pillarWidth: 4,
-  pillarHeight: 11,
-  archSpan: 13,
+  /**
+   * Half-width of the ruins arena.
+   *
+   * Comparable to the starting arena's 58: entering stage 5 should feel like
+   * walking into a room, not into another lane. The elephant needs the space
+   * as much as the player does - a chase down a corridor is a corridor, and it
+   * spends the whole time wedged against the geometry.
+   */
+  halfWidth: 54,
+  /** How far the arena runs along Z. */
+  length: 250,
+  archRows: 5,
+  pillarWidth: 5,
+  pillarHeight: 13,
+  archSpan: 16,
 } as const;
 
-const buildAncientRuins = (stage: number, z: number): number => {
-  const length = RUINS.count * RUINS.archSpacing + 20;
-  pushFloor(stage, z, z + length);
+/**
+ * The ruins arena, filled in by the builder below.
+ *
+ * Exported so the elephant's territory is derived from the same rectangle the
+ * floor is laid on, rather than authored twice and left to drift.
+ */
+export const RUINS_ARENA = { minZ: 0, maxZ: 0, halfWidth: RUINS.halfWidth };
 
-  for (let i = 0; i < RUINS.count; i += 1) {
-    const at = z + 14 + i * RUINS.archSpacing;
-    const side = i % 2 === 0 ? -1 : 1;
-    const centreX = side * 6.5;
-
-    // Two uprights and a lintel: a Roblox ruin is three boxes, not a mesh.
-    for (const offset of [-RUINS.archSpan / 2, RUINS.archSpan / 2]) {
-      pushBox(
-        stage,
-        'ruin',
-        centreX + offset,
-        COURSE.floorY,
-        at,
-        RUINS.pillarWidth,
-        RUINS.pillarHeight,
-        RUINS.pillarWidth,
-      );
-    }
+/** One ruined arch: two uprights and a lintel. Three boxes, not a mesh. */
+const pushArch = (stage: number, centreX: number, atZ: number): void => {
+  for (const offset of [-RUINS.archSpan / 2, RUINS.archSpan / 2]) {
     pushBox(
       stage,
       'ruin',
-      centreX,
-      COURSE.floorY + RUINS.pillarHeight,
-      at,
-      RUINS.archSpan + RUINS.pillarWidth,
-      2.4,
+      centreX + offset,
+      COURSE.floorY,
+      atZ,
+      RUINS.pillarWidth,
+      RUINS.pillarHeight,
       RUINS.pillarWidth,
     );
+  }
+  pushBox(
+    stage,
+    'ruin',
+    centreX,
+    COURSE.floorY + RUINS.pillarHeight,
+    atZ,
+    RUINS.archSpan + RUINS.pillarWidth,
+    2.6,
+    RUINS.pillarWidth,
+  );
+  decorations.push({
+    kind: 'arch',
+    stage,
+    x: centreX,
+    y: COURSE.floorY,
+    z: atZ,
+    scale: 1,
+    rotationY: 0,
+  });
+};
 
-    decorations.push({ kind: 'arch', stage, x: centreX, y: COURSE.floorY, z: at, scale: 1, rotationY: 0 });
+const buildAncientRuins = (stage: number, z: number): number => {
+  const endZ = z + RUINS.length;
 
-    // A fallen block or two, for silhouette.
-    pushBox(stage, 'ruin', -side * 9, COURSE.floorY, at + 9, 5, 2.2, 5);
+  // A floor as wide as the arena, and the boundary to match it. Both come from
+  // the same rectangle, so the player can never be clamped over open air.
+  pushFloor(stage, z, endZ, 'floor', COURSE.floorY, RUINS.halfWidth);
+  RUINS_ARENA.minZ = z;
+  RUINS_ARENA.maxZ = endZ;
+  wideAreas.push({ minZ: z, maxZ: endZ, halfWidth: RUINS.halfWidth });
+
+  // Arches in staggered rows across the whole width. Cover to break the line
+  // between the player and a charging animal, with wide lanes left between
+  // them so neither ever gets wedged.
+  const rowSpacing = RUINS.length / (RUINS.archRows + 1);
+  for (let row = 0; row < RUINS.archRows; row += 1) {
+    const atZ = z + rowSpacing * (row + 1);
+    // Four arches per row, offset every other row so no straight corridor
+    // runs the length of the arena.
+    const stagger = row % 2 === 0 ? 0 : RUINS.halfWidth * 0.24;
+    for (const fraction of [-0.72, -0.24, 0.24, 0.72]) {
+      pushArch(stage, RUINS.halfWidth * fraction + stagger, atZ);
+    }
+    // Fallen blocks between the rows, for silhouette and for cover at ground
+    // level where the arches are all overhead.
+    for (const fraction of [-0.5, 0.1, 0.62]) {
+      pushBox(
+        stage,
+        'ruin',
+        RUINS.halfWidth * fraction - stagger,
+        COURSE.floorY,
+        atZ + rowSpacing * 0.45,
+        7,
+        2.6,
+        7,
+      );
+    }
   }
 
-  return z + length;
+  return endZ;
 };
 
 /**
@@ -1109,8 +1170,24 @@ export const hazardPositionAt = (
  * The arena is far wider than the run it feeds into, so the clamp has to know
  * where the player is standing.
  */
-export const corridorHalfWidthAt = (z: number): number =>
-  z <= COURSE.lobbyEndZ ? COURSE.lobbyHalfWidth : COURSE.halfWidth;
+export const corridorHalfWidthAt = (z: number): number => {
+  if (z <= COURSE.lobbyEndZ) return COURSE.lobbyHalfWidth;
+  for (const area of wideAreas) {
+    if (z >= area.minZ && z <= area.maxZ) return area.halfWidth;
+  }
+  return COURSE.halfWidth;
+};
+
+/**
+ * Every stretch wider than the corridor, the starting arena included.
+ *
+ * The renderer walks this to build its walls, so a wall and a boundary cannot
+ * end up in different places.
+ */
+export const WIDE_AREAS: readonly WideArea[] = [
+  { minZ: COURSE.lobbyStartZ, maxZ: COURSE.lobbyEndZ, halfWidth: COURSE.lobbyHalfWidth },
+  ...wideAreas,
+];
 
 /** The stage containing this Z, or null. */
 export const stageAt = (z: number): StageDefinition | null => {

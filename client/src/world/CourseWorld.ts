@@ -3,9 +3,11 @@ import {
   COURSE_END_Z,
   COURSE_SOLIDS,
   DECORATIONS,
+  corridorHalfWidthAt,
   QUICKSAND,
   STAGES,
   TRAINING,
+  WIDE_AREAS,
   WorldCollision,
   type CourseSolid,
   type SolidKind,
@@ -165,7 +167,11 @@ export class CourseWorld {
    * rather than into nothing.
    */
   private buildPitFloor(): void {
-    const width = COURSE.lobbyHalfWidth * 2 + 120;
+    const widest = Math.max(
+      COURSE.lobbyHalfWidth,
+      ...WIDE_AREAS.map((area) => area.halfWidth),
+    );
+    const width = widest * 2 + 120;
     const from = COURSE.lobbyStartZ - 60;
     const to = COURSE_END_Z + 60;
 
@@ -181,7 +187,7 @@ export class CourseWorld {
     for (const side of [-1, 1]) {
       const skirt = texturedBox(8, COURSE.pitFloorY * -1, to - from, TILE);
       skirt.translate(
-        side * (COURSE.lobbyHalfWidth + 30),
+        side * (widest + 30),
         COURSE.pitFloorY / 2,
         (from + to) / 2,
       );
@@ -259,11 +265,57 @@ export class CourseWorld {
       }
     };
 
-    run(COURSE.lobbyHalfWidth, COURSE.lobbyStartZ, COURSE.lobbyEndZ);
-    run(COURSE.halfWidth, COURSE.lobbyEndZ, COURSE_END_Z + 10);
+    /**
+     * A shoulder wall where the world changes width.
+     *
+     * Without one, a wide area meets a narrow corridor with an open gap either
+     * side and the player looks straight out of the map. Built from the SAME
+     * two widths the boundary uses, so it always exactly closes the step.
+     */
+    const shoulder = (wideHalf: number, narrowHalf: number, atZ: number): void => {
+      const span = wideHalf - narrowHalf;
+      if (span <= 0.01) return;
+      for (const side of [-1, 1]) {
+        const piece = texturedBox(span, COURSE.wallHeight, thickness, TILE);
+        piece.translate(
+          side * (narrowHalf + span / 2),
+          COURSE.wallHeight / 2 - COURSE.floorThickness,
+          atZ,
+        );
+        walls.push(piece);
+      }
+    };
 
-    // The arena's back wall, and the shoulders either side of the corridor
-    // mouth where the arena is far wider than the run it feeds into.
+    // Walk the world from the arena's back wall to the end, splitting at every
+    // change of width. The spans come from WIDE_AREAS - the same list the
+    // movement clamp reads - so a wall can never end up somewhere the boundary
+    // is not.
+    const end = COURSE_END_Z + 10;
+    const boundaries = [COURSE.lobbyStartZ, end];
+    for (const area of WIDE_AREAS) {
+      boundaries.push(area.minZ, area.maxZ);
+    }
+    const marks = [...new Set(boundaries)]
+      .filter((z) => z >= COURSE.lobbyStartZ && z <= end)
+      .sort((a, b) => a - b);
+
+    for (let i = 0; i < marks.length - 1; i += 1) {
+      const fromZ = marks[i] as number;
+      const toZ = marks[i + 1] as number;
+      if (toZ - fromZ < 0.01) continue;
+      // Sampled at the MIDDLE of the span: a boundary value would land exactly
+      // on the edge of a wide area and could resolve either way.
+      const halfWidth = corridorHalfWidthAt((fromZ + toZ) / 2);
+      run(halfWidth, fromZ, toZ);
+
+      const nextZ = marks[i + 2];
+      const nextHalf =
+        nextZ === undefined ? halfWidth : corridorHalfWidthAt((toZ + nextZ) / 2);
+      if (nextHalf > halfWidth) shoulder(nextHalf, halfWidth, toZ - thickness / 2);
+      else shoulder(halfWidth, nextHalf, toZ + thickness / 2);
+    }
+
+    // The arena's back wall.
     const back = texturedBox(
       COURSE.lobbyHalfWidth * 2 + thickness * 2,
       COURSE.wallHeight,
@@ -276,17 +328,6 @@ export class CourseWorld {
       COURSE.lobbyStartZ - thickness / 2,
     );
     walls.push(back);
-
-    const shoulder = COURSE.lobbyHalfWidth - COURSE.halfWidth;
-    for (const side of [-1, 1]) {
-      const piece = texturedBox(shoulder, COURSE.wallHeight, thickness, TILE);
-      piece.translate(
-        side * (COURSE.halfWidth + shoulder / 2),
-        COURSE.wallHeight / 2 - COURSE.floorThickness,
-        COURSE.lobbyEndZ + thickness / 2,
-      );
-      walls.push(piece);
-    }
 
     this.addMerged(walls, this.brickMaterial(), true);
     this.addMerged(hedges, this.solidMaterial(PALETTE.hedge), true);
@@ -311,8 +352,7 @@ export class CourseWorld {
         // every client sees the same treeline.
         const wobble = ((index * 2654435761) >>> 0) / 4294967296;
         const height = SCENERY.trunkMin + wobble * (SCENERY.trunkMax - SCENERY.trunkMin);
-        const halfWidth =
-          z <= COURSE.lobbyEndZ ? COURSE.lobbyHalfWidth : COURSE.halfWidth;
+        const halfWidth = corridorHalfWidthAt(z);
         const x = side * (halfWidth + SCENERY.treeOffsetX + wobble * 7);
         const at = z + wobble * SCENERY.treeSpacingZ * 0.6;
         this.pushTree(trunks, canopies, x, COURSE.floorY, at, 1 + wobble * 0.4);
