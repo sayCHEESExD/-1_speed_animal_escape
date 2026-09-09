@@ -1,0 +1,38 @@
+{
+  "name": "animal-obby-escape",
+  "version": "0.1.0",
+  "private": true,
+  "description": "+1 Animal Obby Escape - browser multiplayer animal-riding obby (Three.js + Colyseus)",
+  "type": "module",
+  "engines": {
+    "node": ">=20.11.0"
+  },
+  "workspaces": [
+    "shared",
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "build:shared": "npm run build --workspace @animal/shared",
+    "dev": "npm run build:shared && concurrently -n server,client -c magenta,cyan \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:server": "npm run dev --workspace @animal/server",
+    "dev:client": "npm run dev --workspace @animal/client",
+    "build": "npm run build:shared && npm run build --workspace @animal/server && npm run build --workspace @animal/client",
+    "build:client": "npm run build:shared && npm run build --workspace @animal/client",
+    "build:server": "npm run build:shared && npm run build --workspace @animal/server",
+    "typecheck": "npm run build:shared && npm run typecheck --workspaces --if-present",
+    "start": "npm run start --workspace @animal/server",
+    "verify:assets": "node scripts/verify-assets.mjs",
+    "size:client": "node scripts/build-size.mjs",
+    "verify:course": "npm run build:shared && node scripts/verify-course.mjs",
+    "verify:progression": "npm run build:server && node scripts/verify-progression.mjs",
+    "verify": "npm run verify:course && npm run verify:progression"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "typescript": "^5.9.3"
+  },
+  "overrides": {
+    "@colyseus/core": "0.16.24"
+  }
+}
