@@ -16,6 +16,26 @@ const SFX_GAIN = 0.34;
 const MUSIC_URL = '/audio/background_music.mp3';
 
 /**
+ * One-shots that are SAMPLES rather than oscillators.
+ *
+ * The deliberate exceptions to "every sound effect is synthesised", for the
+ * same reason the music is: a jump and a death are the two effects the player
+ * hears most closely, and an oscillator sweep reads as a placeholder where a
+ * recorded sound reads as the game. Everything else on the list stays
+ * synthesised, because a pack of wavs is the easiest way to spend the 12 MB
+ * budget - these two together are under 100 KB.
+ *
+ * DECODED, unlike the music, which is streamed. The trade runs the other way
+ * for a short sound: these are fractions of a second, so the decoded buffer is
+ * small, and a one-shot has to start on the exact frame it is asked for rather
+ * than when a stream happens to be ready.
+ */
+const SAMPLE_URLS: Partial<Record<SoundName, string>> = {
+  jump: '/audio/jump.mp3',
+  death: '/audio/death.mp3',
+};
+
+/**
  * Most one-shot voices allowed to sound at once.
  *
  * A ceiling rather than a hope. Web Audio nodes are one-shot by design - a
@@ -101,6 +121,35 @@ export class AudioManager {
   private musicElement: HTMLAudioElement | null = null;
   private musicSource: MediaElementAudioSourceNode | null = null;
 
+  /**
+   * Decoded one-shot samples, by name.
+   *
+   * A sound is only in here once it has actually decoded, which is what makes
+   * the fallback in `play` a simple lookup: until then - and for ever, if the
+   * file is missing or the fetch is blocked - the synthesised voice is used
+   * instead, so a blocked asset is a different sound rather than silence.
+   */
+  private readonly samples = new Map<SoundName, AudioBuffer>();
+  /** Set once the fetches have been kicked off, so they happen exactly once. */
+  private samplesRequested = false;
+
+  /**
+   * The sampled sound currently playing, per name. At most ONE each.
+   *
+   * The cooldowns were tuned against the synthesised voices, every one of which
+   * was SHORTER than its own cooldown - the death lasted 0.5s behind a 0.6s
+   * cooldown - so a one-shot could never catch its own tail. The recorded files
+   * are far longer (both about 1.8s), which quietly breaks that: two deaths
+   * 0.7s apart would clear the cooldown and sound on top of each other, and
+   * jumps would stack until they hit the voice ceiling.
+   *
+   * So a sampled sound REPLACES itself rather than layering. The trigger and
+   * the gain are untouched - every jump still plays the jump - it simply
+   * restarts instead of doubling, which is what keeps "no overlapping deaths"
+   * true now that the sound outlasts its cooldown.
+   */
+  private readonly activeSamples = new Map<SoundName, AudioBufferSourceNode>();
+
   private muted = false;
   private started = false;
 
@@ -150,6 +199,7 @@ export class AudioManager {
     if (!this.started) {
       this.started = true;
       this.startMusic();
+      this.loadSamples();
       logger.info(SCOPE, 'audio started');
     }
 
@@ -237,7 +287,10 @@ export class AudioManager {
     const level = Math.min(Math.max(intensity, 0), 1);
     switch (name) {
       case 'jump':
-        // A rising blip: pitch going up is the most direct way to say "up".
+        // The recorded jump, falling back to the rising blip it replaced -
+        // pitch going up being the most direct way to say "up". Same gain
+        // either way, so the sample cannot be louder than what it replaced.
+        if (this.playSample('jump', now, 0.5 * level)) break;
         this.blip(now, 'square', 320, 640, 0.16, 0.5 * level);
         break;
       case 'land':
@@ -249,6 +302,8 @@ export class AudioManager {
         this.thud(now, 0.1 + level * 0.14, 90);
         break;
       case 'death':
+        // The recorded death, falling back to the descending sawtooth.
+        if (this.playSample('death', now, 0.6)) break;
         this.blip(now, 'sawtooth', 300, 70, 0.5, 0.6);
         break;
       case 'win':
@@ -277,6 +332,9 @@ export class AudioManager {
     this.musicSource?.disconnect();
     this.musicSource = null;
     this.musicElement = null;
+    this.samples.clear();
+    this.activeSamples.clear();
+    this.samplesRequested = false;
     this.started = false;
     void this.context?.close().catch(() => undefined);
     this.context = null;
@@ -334,6 +392,80 @@ export class AudioManager {
   }
 
   // --------------------------------------------------------- the one-shots
+
+  /**
+   * Fetch and decode the sampled one-shots.
+   *
+   * Called from the first `resume()`, for the same reason the music is: there
+   * is no context to decode against until a user gesture has made one. Each
+   * file is independent - one failing leaves the other in place - and a failure
+   * is a warning rather than an error, because the synthesised voice is still
+   * there to fall back to.
+   */
+  private loadSamples(): void {
+    if (this.samplesRequested) return;
+    this.samplesRequested = true;
+
+    for (const [name, url] of Object.entries(SAMPLE_URLS)) {
+      void (async (): Promise<void> => {
+        try {
+          const response = await fetch(url);
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          // Decoded against the live context, so the buffer is already at the
+          // right sample rate when it is first asked for.
+          const ctx = this.context;
+          if (!ctx) return;
+          const decoded = await ctx.decodeAudioData(await response.arrayBuffer());
+          this.samples.set(name as SoundName, decoded);
+        } catch (error) {
+          logger.warn(SCOPE, `could not load ${url}: ${String(error)} - using the synthesised voice`);
+        }
+      })();
+    }
+  }
+
+  /**
+   * Play a decoded sample, if it is ready.
+   *
+   * Returns FALSE when there is nothing to play, which is what lets each case
+   * in `play` read as "the sample, or the oscillator that came before it". The
+   * gain passed in is the same figure the synthesised voice used, and it is
+   * applied on a node feeding `sfxBus` - so the cooldown, the voice ceiling,
+   * the master volume and mute all treat this exactly like any other one-shot.
+   */
+  private playSample(name: SoundName, at: number, gain: number): boolean {
+    const ctx = this.context;
+    const bus = this.sfxBus;
+    const buffer = this.samples.get(name);
+    if (!ctx || !bus || !buffer) return false;
+
+    // Cut the previous copy of THIS sound first. Stopping it fires its own
+    // `onended`, which is what uncounts the voice and disconnects the nodes, so
+    // the ceiling stays honest rather than leaking a voice per retrigger.
+    const previous = this.activeSamples.get(name);
+    if (previous) {
+      try {
+        previous.stop();
+      } catch {
+        // Already finished. Nothing to cut.
+      }
+    }
+
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+
+    const envelope = ctx.createGain();
+    envelope.gain.value = gain;
+
+    source.connect(envelope);
+    envelope.connect(bus);
+    this.activeSamples.set(name, source);
+    this.hold(source, envelope, at, buffer.duration, () => {
+      // Only clear the slot if a newer copy has not already claimed it.
+      if (this.activeSamples.get(name) === source) this.activeSamples.delete(name);
+    });
+    return true;
+  }
 
   private blip(
     at: number,
@@ -419,7 +551,13 @@ export class AudioManager {
    * started without being counted, or one that ended without being uncounted,
    * would leave the ceiling either useless or permanently closed.
    */
-  private hold(osc: OscillatorNode, envelope: GainNode, at: number, length: number): void {
+  private hold(
+    osc: AudioScheduledSourceNode,
+    envelope: GainNode,
+    at: number,
+    length: number,
+    onDone?: () => void,
+  ): void {
     this.voices += 1;
     osc.start(at);
     osc.stop(at + length + 0.02);
@@ -427,6 +565,7 @@ export class AudioManager {
       this.voices = Math.max(0, this.voices - 1);
       osc.disconnect();
       envelope.disconnect();
+      onDone?.();
     };
   }
 }

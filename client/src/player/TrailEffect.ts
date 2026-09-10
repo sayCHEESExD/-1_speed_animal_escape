@@ -38,8 +38,22 @@ const STEP = 1.1;
 /** Half-width of the ribbon, in world units. */
 const HALF_WIDTH = 0.85;
 
-/** Height above the hooves the ribbon is emitted at. */
-const EMIT_Y = 1.4;
+/**
+ * Height above the hooves the ribbon is emitted at.
+ *
+ * Raised from 1.4, which sat BELOW the belly on eight of the ten animals and
+ * so streamed out of the legs rather than off the mount - the reason the trail
+ * read as detached. Every animal's barrel spans `belly` to `belly + bodyH`,
+ * derived from its `riderOffset`, and those spans run from 1.27..2.70 on the
+ * dragon to 1.85..3.25 on the deer: 2.0 is the LOWEST height inside all ten,
+ * which is the smallest raise that attaches the ribbon to every mount rather
+ * than only to the tall ones.
+ *
+ * Nothing else moves with it. The emission rule compares against this offset
+ * (see `update`), and since it was already past STEP at 1.4 it still is at
+ * 2.0 - so the spacing, and therefore the ribbon's length, are unchanged.
+ */
+const EMIT_Y = 2.0;
 
 /**
  * The ribbon a trail leaves behind.
