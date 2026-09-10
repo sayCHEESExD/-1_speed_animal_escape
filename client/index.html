@@ -8,6 +8,16 @@
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
     />
     <title>+1 Animal Obby Escape</title>
+
+    <!--
+      The Bloxity SDK.
+      Loaded BEFORE the game bundle so `window.Legion` is there when `main.ts`
+      calls `init`. It is deliberately NOT `async`: the bundle is a module and
+      therefore deferred, and a plain script above it is guaranteed to have run
+      first. If the CDN is unreachable the game still boots - every call goes
+      through a guard that treats a missing SDK as "no portal".
+    -->
+    <script src="https://sdk.bloxity.io/legion-sdk.min.js"></script>
     <style>
       :root {
         color-scheme: dark;

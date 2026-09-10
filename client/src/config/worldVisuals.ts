@@ -43,10 +43,6 @@ export const PALETTE = {
   winPad: '#ff9d1f',
   winPadAlt: '#ffc247',
 
-  /** White chevrons on a green strip - the "go this way" marker. */
-  chevron: 0xffffff,
-  boostStrip: 0x4fd634,
-
   /** Animal display stands in the lobby. */
   standBase: 0xc7c3e2,
   standTop: 0xffd54a,

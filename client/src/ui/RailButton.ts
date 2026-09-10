@@ -24,6 +24,15 @@ export class RailButton {
       readonly label: string;
       /** Inline SVG markup. */
       readonly icon: string;
+      /**
+       * The keyboard shortcut this tile answers to, shown in its corner.
+       *
+       * Presentation only - the key is bound in `Game`, and this is the label
+       * that tells a mouse-and-keyboard player it exists at all. Omitted on a
+       * tile with no shortcut, and hidden outright in touch mode, so the
+       * mobile layout is exactly what it was.
+       */
+      readonly hotkey?: string;
       readonly onClick: () => void;
     },
   ) {
@@ -39,6 +48,17 @@ export class RailButton {
     label.className = 'aoe-tile__label aoe-font aoe-outline';
     label.textContent = options.label;
     this.root.appendChild(label);
+
+    if (options.hotkey) {
+      const key = document.createElement('span');
+      key.className = 'aoe-tile__key aoe-font';
+      key.textContent = options.hotkey;
+      key.setAttribute('aria-hidden', 'true');
+      this.root.appendChild(key);
+      // Say it in the accessible name too, so it is not a visual-only fact.
+      this.root.setAttribute('aria-keyshortcuts', options.hotkey);
+      this.root.setAttribute('aria-label', `${options.label} (${options.hotkey})`);
+    }
 
     this.badge = document.createElement('span');
     this.badge.className = 'aoe-tile__badge aoe-font';

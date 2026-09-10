@@ -92,12 +92,38 @@ export class NetworkClient {
   private room: Room<NetCourseState> | null = null;
   private status: ConnectionStatus = 'idle';
 
+  /**
+   * Who this browser is on Bloxity, asked at join time.
+   *
+   * A CALLBACK rather than a stored id: the account can change between one
+   * join and the next, and a value captured at construction would send the
+   * previous player's id after a logout. Kept as a plain function so `net/`
+   * still imports nothing from the portal layer.
+   */
+  private identity: (() => string | null) | null = null;
+
   constructor(handlers: NetworkHandlers = {}) {
     this.handlers = handlers;
   }
 
+  /** Where the room should get the Bloxity account id from, if there is one. */
+  setIdentityProvider(provider: () => string | null): void {
+    this.identity = provider;
+  }
+
   get sessionId(): string | null {
     return this.room?.sessionId ?? null;
+  }
+
+  /**
+   * The Colyseus room id, or '' when not in one.
+   *
+   * Exposed for the portal, which uses it as the join target for a friend
+   * invite. A string rather than the room itself: the room object is this
+   * class's business and nothing outside `net/` should be able to send on it.
+   */
+  get roomId(): string {
+    return this.room?.roomId ?? '';
   }
 
   get connectionStatus(): ConnectionStatus {
@@ -138,6 +164,9 @@ export class NetworkClient {
       try {
         this.room = await this.client.joinOrCreate<NetCourseState>(ROOM_NAME, {
           playerId,
+          // Optional: a signed-out player simply has none, and the room falls
+          // back to the browser-stored id exactly as it always did.
+          bloxityId: this.identity?.() ?? undefined,
         });
         break;
       } catch (error) {

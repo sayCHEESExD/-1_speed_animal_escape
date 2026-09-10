@@ -19,11 +19,13 @@ import {
 import { serverConfig } from '../config/serverConfig.js';
 import { MovementService } from '../movement/MovementService.js';
 import { AnimalService } from '../progression/AnimalService.js';
+import { buxGrants } from '../progression/BuxGrants.js';
 import { leaderboardService } from '../progression/LeaderboardService.js';
 import { profileStore } from '../progression/ProfileStore.js';
 import { RebirthService } from '../progression/RebirthService.js';
 import { SpeedService } from '../progression/SpeedService.js';
 import { StageService } from '../progression/StageService.js';
+import { wallet } from '../progression/Wallet.js';
 import { TrailService } from '../progression/TrailService.js';
 import { ElephantService } from '../world/ElephantService.js';
 import { logger } from '../util/logger.js';
@@ -39,6 +41,8 @@ const AUTOSAVE_SECONDS = 15;
 interface JoinOptions {
   playerId?: string;
   name?: string;
+  /** The Bloxity account id, when the player is signed in to the portal. */
+  bloxityId?: string;
 }
 
 /**
@@ -74,6 +78,16 @@ export class CourseRoom extends Room<CourseState> {
 
   /** Browser-stored player id per session, for persistence. */
   private readonly playerIds = new Map<string, string>();
+
+  /**
+   * Bloxity account id per session, for Bux fulfilment.
+   *
+   * Separate from `playerIds` because they are different identities: the
+   * player id is a uuid this browser generated and the Bloxity id belongs to
+   * an account that can sign in from anywhere. A purchase is made by the
+   * ACCOUNT, so that is what a grant is addressed to.
+   */
+  private readonly bloxityIds = new Map<string, string>();
 
   /** Scratch motion, so the per-tick death check allocates nothing. */
   private readonly scratch: PlayerMotion = createMotion();
@@ -162,6 +176,13 @@ export class CourseRoom extends Room<CourseState> {
     this.trails.initialise(player);
     this.speeds.initialise(player);
     this.stages.initialise(client.sessionId);
+
+    const bloxityId = typeof options.bloxityId === 'string' ? options.bloxityId : '';
+    if (bloxityId) {
+      this.bloxityIds.set(client.sessionId, bloxityId);
+      // Anything bought while they were away, or in another session.
+      this.applyGrants(client.sessionId, player);
+    }
     this.rebirths.sync(player);
 
     // `initialise` reset the level to 1 for a fresh profile; a restored one
@@ -188,6 +209,7 @@ export class CourseRoom extends Room<CourseState> {
     this.movement.forget(client.sessionId);
     this.speeds.forget(client.sessionId);
     this.stages.forget(client.sessionId);
+    this.bloxityIds.delete(client.sessionId);
     this.animals.forget(client.sessionId);
     this.trails.forget(client.sessionId);
     this.playerIds.delete(client.sessionId);
@@ -339,6 +361,20 @@ export class CourseRoom extends Room<CourseState> {
     // the most expensive thing in this room.
     leaderboardService.update(delta, this.state.leaderboard, this.state.players, this.playerIds);
 
+    /*
+     * Bux bought by someone already in the room.
+     *
+     * Guarded on `hasPending` so the common case - nobody has bought anything
+     * - is one boolean per tick rather than a walk of every player. The
+     * webhook queues rather than writing, because a direct write to the stored
+     * profile would be overwritten by this player's next autosave.
+     */
+    if (buxGrants.hasPending) {
+      for (const [sessionId, player] of this.state.players) {
+        this.applyGrants(sessionId, player);
+      }
+    }
+
     for (const [sessionId, player] of this.state.players) {
       if (!player.ready) continue;
 
@@ -365,6 +401,31 @@ export class CourseRoom extends Room<CourseState> {
         this.persist(sessionId, player);
       }
     }
+  }
+
+  /**
+   * Hand over anything this player has paid for and not yet received.
+   *
+   * Wins go through `wallet.add` like every other award in the game - there is
+   * exactly one place they move, and a payment is not an excuse to open a
+   * second one. The profile is saved immediately so a crash between the
+   * webhook and the next autosave cannot lose a purchase.
+   */
+  private applyGrants(sessionId: string, player: PlayerState): void {
+    const bloxityId = this.bloxityIds.get(sessionId);
+    if (!bloxityId) return;
+
+    const grants = buxGrants.drain(bloxityId);
+    if (grants.length === 0) return;
+
+    for (const grant of grants) {
+      if (grant.wins > 0) wallet.add(player, grant.wins);
+      logger.info(
+        SCOPE,
+        `granted ${grant.sku} to ${sessionId} (+${grant.wins} wins) [${grant.transactionId}]`,
+      );
+    }
+    this.persist(sessionId, player);
   }
 
   /** Put a player back at the starting arena and tell them so. */

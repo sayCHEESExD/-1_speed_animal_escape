@@ -10,6 +10,13 @@ export interface ServerConfig {
   readonly patchRateMs: number;
   /** Directory holding persisted player profiles. */
   readonly dataDir: string;
+  /**
+   * Shared secret for the Bloxity fulfilment webhook, or '' to accept any.
+   *
+   * Empty by default so a local server needs no configuration. Set it in
+   * production: without one the endpoint grants Wins to anyone who finds it.
+   */
+  readonly buxWebhookSecret: string;
 }
 
 const int = (value: string | undefined, fallback: number): number => {
@@ -40,4 +47,5 @@ export const serverConfig: ServerConfig = {
   // Relative to the server package, which is the working directory for both
   // `npm run dev` and `npm start`, so a restart finds the same file either way.
   dataDir: resolve(process.env['ANIMAL_DATA_DIR'] ?? 'data'),
+  buxWebhookSecret: process.env['BLOXITY_WEBHOOK_SECRET'] ?? '',
 };

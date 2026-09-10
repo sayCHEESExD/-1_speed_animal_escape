@@ -4,6 +4,7 @@ import {
   COURSE_SOLIDS,
   DECORATIONS,
   corridorHalfWidthAt,
+  formatSpeed,
   QUICKSAND,
   STAGES,
   TRAINING,
@@ -147,7 +148,7 @@ export class CourseWorld {
 
     for (const solid of COURSE_SOLIDS) {
       const list = byKind.get(solid.kind) ?? [];
-      list.push(boxFor(solid, solid.kind === 'boost' ? 3.5 : TILE));
+      list.push(boxFor(solid, TILE));
       byKind.set(solid.kind, list);
     }
 
@@ -552,7 +553,10 @@ export class CourseWorld {
     for (const stage of STAGES) {
       const sign = new CanvasSign(13, 5.4, [
         {
-          text: `+${stage.winReward} Win${stage.winReward === 1 ? '' : 's'}`,
+          // Formatted, like every other large figure the player reads. The
+          // late stages pay millions, and "+5000000 Wins" is a number nobody
+          // parses at a gallop.
+          text: `+${formatSpeed(stage.winReward)} Win${stage.winReward === 1 ? '' : 's'}`,
           size: 1,
           fill: '#ffffff',
           stroke: '#20303f',
@@ -622,10 +626,6 @@ export class CourseWorld {
       case 'winPad':
         return this.texturedMaterial(
           this.textures.goldCheck(PALETTE.winPad, PALETTE.winPadAlt),
-        );
-      case 'boost':
-        return this.texturedMaterial(
-          this.textures.chevrons(hex(PALETTE.boostStrip), '#ffffff'),
         );
       case 'stand':
       default:

@@ -4,6 +4,8 @@ import {
   type StageAwardedMessage,
 } from '@animal/shared';
 import { AudioManager } from '../audio/AudioManager.js';
+import { Bloxity } from '../bloxity/Bloxity.js';
+import { BloxityAvatar } from '../bloxity/BloxityAvatar.js';
 import { PlayerAudio } from '../audio/PlayerAudio.js';
 import { Vector3 } from 'three';
 import { ThirdPersonCamera } from '../camera/ThirdPersonCamera.js';
@@ -23,6 +25,7 @@ import { RebirthPanel } from '../ui/RebirthPanel.js';
 import { SpeedHud } from '../ui/SpeedHud.js';
 import { SpeedPopups } from '../ui/SpeedPopups.js';
 import { TrailShop } from '../ui/TrailShop.js';
+import { BloxityPanel } from '../ui/BloxityPanel.js';
 import { WinFlight } from '../ui/WinFlight.js';
 import { WinsCounter } from '../ui/WinsCounter.js';
 import { ICONS, injectHudStyles } from '../ui/hudStyles.js';
@@ -30,6 +33,43 @@ import { logger } from '../util/logger.js';
 import { CourseWorld } from '../world/CourseWorld.js';
 
 const SCOPE = 'Game';
+
+/**
+ * Which shortcut a key event means, or '' for none.
+ *
+ * Reads `code` FIRST and falls back to `key`, and that fallback is the whole
+ * point of this function. `code` is the physical key and is the right thing to
+ * bind to, but it is not always populated: on-screen keyboards, remote-input
+ * and automation paths, and some IME states all deliver a perfectly ordinary
+ * keystroke with `code` set to the empty string. Matching on `code` alone
+ * meant those keystrokes silently did nothing - the shortcuts looked
+ * implemented and were not, which is exactly how they shipped broken.
+ *
+ * Returns a lower-case name so the two sources collapse to one value and the
+ * caller has a single thing to switch on.
+ */
+const shortcutOf = (event: KeyboardEvent): string => {
+  const code = event.code;
+  if (code.startsWith('Key') && code.length === 4) return code.slice(3).toLowerCase();
+  if (code) return code.toLowerCase();
+  // No physical code. The typed character is what is left, and for these
+  // shortcuts - single letters and Escape - it says the same thing.
+  return (event.key || '').toLowerCase();
+};
+
+/**
+ * True if the keystroke belongs to a field the player is typing in.
+ *
+ * Covers every element that takes text, not just `<input>`: a shortcut that
+ * fired while someone typed in a textarea would be just as wrong.
+ */
+const isTyping = (target: EventTarget | null): boolean => {
+  const element = target as HTMLElement | null;
+  if (!element) return false;
+  if (element.isContentEditable) return true;
+  const tag = element.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+};
 
 /** Scratch for projecting the mount to the screen. One award allocates nothing. */
 const WIN_FLIGHT_ORIGIN = new Vector3();
@@ -57,8 +97,16 @@ export class Game {
   private readonly trailButton: RailButton;
   private readonly audioButton: RailButton;
   private readonly audio = new AudioManager();
+  private readonly bloxity: Bloxity;
+  private readonly bloxityPanel: BloxityPanel;
+  private readonly fpsReadout: HTMLDivElement;
+  /** Cosmetics on the local rider. Built once the model exists. */
+  private bloxityAvatar: BloxityAvatar | null = null;
+  /** Latest equipped/proportions, held until the rider is built. */
+  private pendingAvatar: (() => void) | null = null;
+  private fpsAccum = 0;
+  private fpsFrames = 0;
   private readonly playerAudio: PlayerAudio;
-  private readonly hint: HTMLDivElement;
   private readonly rebirthPanel: RebirthPanel;
   private readonly trailShop: TrailShop;
   private readonly network: NetworkClient;
@@ -114,18 +162,21 @@ export class Game {
       variant: 'rebirth',
       label: 'Rebirth',
       icon: ICONS.rebirth,
+      hotkey: 'R',
       onClick: () => this.openOnly(this.rebirthPanel),
     });
     this.trailButton = new RailButton(this.rail, {
       variant: 'trail',
       label: 'Trails',
       icon: ICONS.trail,
+      hotkey: 'T',
       onClick: () => this.openOnly(this.trailShop),
     });
     this.audioButton = new RailButton(this.rail, {
       variant: 'audio',
       label: 'Sound',
       icon: ICONS.audio,
+      hotkey: 'M',
       onClick: () => {
         // The ONE place muting happens, whether it was a click or the M key.
         const muted = this.audio.toggleMuted();
@@ -136,20 +187,49 @@ export class Game {
     this.playerAudio = new PlayerAudio(this.audio);
 
     /*
-     * The hint that makes the rail reachable on a desktop.
+     * The portal bridge.
      *
-     * Pointer lock hides the cursor, so without being told, a mouse-and-
-     * keyboard player has no way to know these buttons can be clicked at all.
-     * It shows while the cursor is captured and swaps to the way back as soon
-     * as it is not - both driven by the class `MouseLook` sets, so the hint
-     * cannot disagree with the actual input state.
+     * Everything Bloxity can change about this game arrives through the host
+     * object below, and nothing else in the codebase imports the SDK. The
+     * renderer, the audio and the input layer are handed plain values and
+     * never learn that a portal exists - which is what makes the whole
+     * integration removable, and what keeps it working when the SDK script
+     * simply is not there.
      */
-    this.hint = document.createElement('div');
-    this.hint.className = 'aoe-hint aoe-font';
-    this.hint.innerHTML =
-      '<span class="aoe-hint__locked">Esc for cursor &middot; R Rebirth &middot; T Trails</span>' +
-      '<span class="aoe-hint__free">Click the world to play on</span>';
-    container.appendChild(this.hint);
+    this.bloxity = new Bloxity({
+      setMasterVolume: (level) => this.audio.setMasterVolume(level),
+      setMusicVolume: (level) => this.audio.setMusicVolume(level),
+      setGraphicsQuality: (level) => this.renderer.setQuality(level),
+      setShowFps: (show) => {
+        this.fpsReadout.hidden = !show;
+      },
+      setCameraSensitivity: (scale) => this.input.look.setSensitivityScale(scale),
+      // The portal asks; the SERVER still decides where anyone is placed.
+      respawn: () => this.network.requestRespawn(),
+      pointerLockChanged: (locked) => this.input.look.setCursorFree(!locked),
+      avatarChanged: (equipped, proportions) => {
+        const apply = (): void => this.bloxityAvatar?.apply(equipped, proportions);
+        // Cosmetics can arrive before the FBX has finished loading.
+        if (this.bloxityAvatar) apply();
+        else this.pendingAvatar = apply;
+      },
+    });
+
+    this.fpsReadout = document.createElement('div');
+    this.fpsReadout.className = 'aoe-fps aoe-font';
+    this.fpsReadout.hidden = true;
+    container.appendChild(this.fpsReadout);
+
+    this.bloxityPanel = new BloxityPanel(container, this.bloxity);
+
+    /*
+     * There is no on-screen hint line any more.
+     *
+     * It existed to tell a desktop player that the rail was clickable and
+     * which keys opened what. The tiles now carry their own key caps, so the
+     * line was saying a second time what the buttons already say - and it was
+     * the last piece of keyboard text that showed on a phone.
+     */
 
     window.addEventListener('keydown', this.onHotkey);
     // Audio can only start on a real gesture, and no single one of them is
@@ -165,6 +245,12 @@ export class Game {
       onStatusChange: (status) => this.onStatusChange(status),
       onSelfJoined: (sessionId) => {
         this.localSessionId = sessionId;
+        // The room a friend would be invited INTO. Published as soon as it is
+        // joinable, which is what makes an invite land beside the player
+        // rather than merely in the game.
+        const roomId = this.network.roomId;
+        this.bloxity.updateRoom(roomId);
+        this.bloxityPanel.setRoom(roomId);
       },
       onPlayerAdded: (sessionId, player) => this.onPlayerAdded(sessionId, player),
       onPlayerChanged: (sessionId, player) => this.onPlayerChanged(sessionId, player),
@@ -181,6 +267,10 @@ export class Game {
       },
       onStageAwarded: (message) => this.onStageAwarded(message),
     });
+
+    // The room needs to know which Bloxity account this is, or a purchase
+    // fulfilled by webhook has no profile to land in.
+    this.network.setIdentityProvider(() => this.bloxity.getUser()?._id ?? null);
 
     this.run = new RunController(this.world.collision, {
       claimStage: (index) => {
@@ -208,8 +298,7 @@ export class Game {
   private readonly onHotkey = (event: KeyboardEvent): void => {
     if (event.ctrlKey || event.metaKey || event.altKey) return;
     if (event.repeat) return;
-    const target = event.target as HTMLElement | null;
-    if (target && (target.tagName === 'INPUT' || target.isContentEditable)) return;
+    if (isTyping(event.target)) return;
 
     /*
      * A key PRESSES THE BUTTON. It does not do the same thing as the button.
@@ -220,26 +309,47 @@ export class Game {
      * mute key used to toggle the audio itself and repaint the tile by hand,
      * which is two copies of one action waiting to disagree.
      */
-    switch (event.code) {
-      case 'KeyR':
+    switch (shortcutOf(event)) {
+      case 'r':
         this.rebirthButton.press();
         break;
-      case 'KeyT':
+      case 't':
         this.trailButton.press();
         break;
-      case 'KeyM':
+      case 'm':
         this.audioButton.press();
         break;
-      case 'Escape':
+      case 'escape':
         // The browser releases the lock on Escape whatever the page wants, so
         // this only closes whatever was open - `MouseLook` handles the cursor.
         for (const panel of [this.rebirthPanel, this.trailShop]) panel.setOpen(false);
         this.input.look.setCursorFree(true);
+        // And hand ESC to the portal, which owns the pause menu when the game
+        // is embedded. Standalone this is a no-op.
+        this.bloxity.showPortalMenu(true);
         break;
       default:
         break;
     }
   };
+
+  /**
+   * The frame counter behind the portal's `show_fps` setting.
+   *
+   * Averaged over half a second rather than shown per frame: a number that
+   * changes sixty times a second is a number nobody can read, and the point of
+   * the readout is to be readable.
+   */
+  private tickFps(delta: number): void {
+    if (this.fpsReadout.hidden) return;
+    this.fpsAccum += delta;
+    this.fpsFrames += 1;
+    if (this.fpsAccum < 0.5) return;
+    const fps = Math.round(this.fpsFrames / this.fpsAccum);
+    this.fpsReadout.textContent = `${fps} FPS`;
+    this.fpsAccum = 0;
+    this.fpsFrames = 0;
+  }
 
   /** Any real gesture is permission to start audio. */
   private readonly onGesture = (): void => {
@@ -259,6 +369,22 @@ export class Game {
     panel.toggle();
   }
 
+  /**
+   * Bring the portal up.
+   *
+   * Called before anything else loads, because the loading REPORT is one of
+   * the things it provides: a portal that learned about this game only once
+   * the game had finished loading would have nothing to show while it did.
+   */
+  startBloxity(): void {
+    this.bloxity.start();
+  }
+
+  /** Progress, for the portal's loading screen. */
+  loadingStep(text: string): void {
+    this.bloxity.loadingStep(text);
+  }
+
   /** Load assets and build the world. Networking is started separately. */
   async initialise(): Promise<PlayerModelReport> {
     this.world.addTo(this.sceneManager.scene);
@@ -266,6 +392,17 @@ export class Game {
     this.modelReport = await playerModelLoader.load();
 
     this.localPlayer = new LocalPlayer(this.world.collision, STARTER_ANIMAL_SLOT);
+
+    // Cosmetics, on the LOCAL rider only. Remote riders keep the shared
+    // default material - their cosmetics are not ours to fetch, and a texture
+    // request per remote player is a lot of CDN traffic for something nobody
+    // looks at while it runs past.
+    const rider = this.localPlayer.mount.rider;
+    this.bloxityAvatar = new BloxityAvatar(rider.visual, rider.model);
+    // Anything that arrived while the FBX was still loading.
+    this.pendingAvatar?.();
+    this.pendingAvatar = null;
+
     this.sceneManager.scene.add(this.localPlayer.mount.root);
     // The trail lives in world space, so it is added beside the mount.
     this.sceneManager.scene.add(this.localPlayer.mount.worldRoot);
@@ -282,10 +419,17 @@ export class Game {
 
   start(): void {
     this.input.attach(this.renderer.renderer.domElement);
+    // The loading screen comes down and the session begins. Both are the
+    // portal's to draw; this only says when.
+    this.bloxity.loadingEnd();
+    this.bloxity.gameplayStart();
   }
 
   stop(): void {
     this.input.detach();
+    this.bloxity.gameplayEnd();
+    // Out of the room, so a friend is not invited into a game nobody is in.
+    this.bloxity.updateRoom('');
     void this.network.disconnect();
   }
 
@@ -355,6 +499,7 @@ export class Game {
       this.flushInput();
     }
 
+    this.tickFps(delta);
     if (player) this.playerAudio.update(delta, player);
     // The boards redraw only when the standings actually move, so handing them
     // the snapshot every frame costs a string compare.
@@ -412,6 +557,11 @@ export class Game {
       return;
     }
     this.remotePlayers.add(sessionId, state);
+    // The portal draws the "your friend just joined" toast; it only needs to
+    // be told who. The session id is all this game has for a stranger, which
+    // is exactly what it is - a handle, not a name it invented.
+    this.bloxity.playerJoined(sessionId);
+    this.bloxity.playerInRoom(sessionId);
   }
 
   private onPlayerChanged(sessionId: string, state: NetPlayerState): void {
@@ -542,8 +692,11 @@ export class Game {
     window.removeEventListener('keydown', this.onGesture);
     window.removeEventListener('mousedown', this.onGesture);
     window.removeEventListener('touchstart', this.onGesture);
+    this.bloxity.dispose();
+    this.bloxityPanel.dispose();
+    this.bloxityAvatar?.dispose();
+    this.fpsReadout.remove();
     this.audio.dispose();
-    this.hint.remove();
     this.rebirthButton.dispose();
     this.trailButton.dispose();
     this.audioButton.dispose();

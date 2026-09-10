@@ -34,8 +34,6 @@ export type SolidKind =
   | 'ruin'
   /** The small win pad at the right of a stage's end. */
   | 'winPad'
-  /** A chevron speed strip. */
-  | 'boost'
   /** An animal display stand. */
   | 'stand'
   /** A platform that periodically sinks. Rendered with a warning shake. */
@@ -306,7 +304,7 @@ export const COURSE = {
   /** Bridge from one stage's end to the next stage's run-up. */
   stageGap: 26,
   /** How many stages exist. */
-  stageCount: 20,
+  stageCount: 30,
 } as const;
 
 /**
@@ -354,6 +352,22 @@ const STAGE_TUNING: readonly StageTuning[] = [
   { name: 'Ancient Temple', difficulty: 'NIGHTMARE', recommendedLevel: 112 },
   { name: 'Chaos Run', difficulty: 'NIGHTMARE', recommendedLevel: 116 },
   { name: 'Final Arena', difficulty: 'NIGHTMARE', recommendedLevel: 120 },
+  // 21-30. The increments tighten deliberately: past stage 20 the difficulty
+  // comes from the obstacles, not from demanding another twenty levels for
+  // each one. Stage 30 asks for level 160, which is six rebirths - a real ask
+  // for a final stage, and one the ladder actually reaches.
+  { name: 'Jungle Bridge', difficulty: 'NIGHTMARE', recommendedLevel: 124 },
+  { name: 'Boulder Valley', difficulty: 'NIGHTMARE', recommendedLevel: 128 },
+  { name: 'Floating Islands', difficulty: 'NIGHTMARE', recommendedLevel: 132 },
+  { name: 'Lava Fortress', difficulty: 'NIGHTMARE', recommendedLevel: 136 },
+  { name: 'Giant Jungle', difficulty: 'NIGHTMARE', recommendedLevel: 140 },
+  { name: 'Ice Mountain', difficulty: 'NIGHTMARE', recommendedLevel: 144 },
+  // Not "Ancient Temple": stage 18 already carries that name, and two gates
+  // reading the same thing is a bug the player sees.
+  { name: 'Grand Temple', difficulty: 'NIGHTMARE', recommendedLevel: 148 },
+  { name: 'Storm Run', difficulty: 'NIGHTMARE', recommendedLevel: 152 },
+  { name: 'Final Chaos', difficulty: 'NIGHTMARE', recommendedLevel: 156 },
+  { name: 'Final Summit', difficulty: 'NIGHTMARE', recommendedLevel: 160 },
 ];
 
 /**
@@ -369,6 +383,11 @@ const STAGE_REWARDS = [
   // the whole ladder something to farm backwards.
   700, 1200, 2000, 3200, 5000, 8000, 12_000, 18_000, 27_000, 40_000, 60_000,
   90_000,
+  // 21-30, continuing the same roughly-x1.5 climb rather than the doubling
+  // the fallback would have used - thirty stages of doubling ends in numbers
+  // that mean nothing.
+  135_000, 200_000, 300_000, 450_000, 675_000, 1_000_000, 1_500_000,
+  2_200_000, 3_300_000, 5_000_000,
 ] as const;
 
 export const stageReward = (index: number): number => {
@@ -847,8 +866,24 @@ const pushSteps = (
 const buildRollingCorridor = (stage: number, z: number): number => {
   const width = ROLLING.laneHalfWidth * 2;
 
-  // Up onto the gantry on a flight of steps.
-  const top = pushSteps(stage, z, COURSE.floorY, ROLLING.deckY, width);
+  /*
+   * Up onto the gantry, on a flight as WIDE AS THE CORRIDOR.
+   *
+   * It used to be eighteen units wide - the gantry's width - with nothing at
+   * all either side of it, while the corridor feeding it is sixty-four. A
+   * player who arrived a few degrees off-centre walked straight past the
+   * bottom step into the pit; simulated from the run-up, every angled approach
+   * died, at every level, from half a stick of sideways input. It also meant a
+   * mount whose position was corrected into the stair volume had nothing under
+   * it and fell through the world, which is the version of this that only
+   * shows up against a real server with real correction.
+   *
+   * Full width removes the whole class: there is no narrow bridge to miss and
+   * no edge to drift off, and the step onto the narrow gantry now happens at
+   * the TOP, where the gantry actually starts and where the pit either side of
+   * it is the stage's intended hazard.
+   */
+  const top = pushSteps(stage, z, COURSE.floorY, ROLLING.deckY, COURSE.halfWidth * 2);
   z = top;
 
   const length = ROLLING.ledgeSpacing * 8;
@@ -899,8 +934,8 @@ const buildRollingCorridor = (stage: number, z: number): number => {
     });
   }
 
-  // And back down at the far end.
-  return pushSteps(stage, endZ, ROLLING.deckY, COURSE.floorY, width);
+  // And back down at the far end, on the same full-width footing.
+  return pushSteps(stage, endZ, ROLLING.deckY, COURSE.floorY, COURSE.halfWidth * 2);
 };
 
 /**
@@ -2129,6 +2164,634 @@ const buildFinalArena = (stage: number, z: number): number => {
   return at + runIn;
 };
 
+// ---------------------------------------------------------------------------
+// Stages 21-30.
+//
+// Built from the same primitives as everything before them, for the same
+// reason: thirty stages of authored content is only maintainable while none of
+// them needs its own physics. Where these ask for a "moving platform" it is a
+// platform that RISES AND SINKS on a cycle - the mechanic stages 3, 13, 18 and
+// 20 already use - rather than one that travels sideways, which would need the
+// collision model to carry a rider and is not a change to make in a content
+// pass.
+// ---------------------------------------------------------------------------
+
+/**
+ * One rising-and-sinking platform, with the safety rule applied.
+ *
+ * Every all-sinking row in the game has to keep something up at all times, and
+ * the way that is guaranteed is by PHASE: lanes a fraction of a cycle apart
+ * are never all down together. Wrapped up here so ten stages cannot each get
+ * it slightly wrong.
+ */
+const pushSinker = (
+  stage: number,
+  centreX: number,
+  centreZ: number,
+  size: number,
+  cycle: number,
+  phase: number,
+  depth = 9,
+  /** Top of the platform. Not every stage is crossed at floor level. */
+  topY: number = COURSE.floorY,
+): void => {
+  sinking.push({
+    minX: centreX - size / 2,
+    maxX: centreX + size / 2,
+    minY: topY - 0.8,
+    maxY: topY,
+    minZ: centreZ - size / 2,
+    maxZ: centreZ + size / 2,
+    kind: 'sinking',
+    stage,
+    cycle,
+    phase: ((phase % cycle) + cycle) % cycle,
+    steady: cycle * 0.45,
+    warn: cycle * 0.16,
+    sunk: cycle * 0.2,
+    depth,
+  });
+};
+
+/**
+ * Stage 21: jungle bridges over a ravine.
+ *
+ * Three plank bridges the whole way across, and the broken sections are
+ * staggered between them - so there is always a way forward, and it is always
+ * a lane change rather than a leap of faith. The "sway" is a shallow, slow
+ * sink on the middle lane: enough to read as rope and timber, not enough to
+ * throw a mount off.
+ */
+const buildJungleBridge = (stage: number, z: number): number => {
+  // A LAYOUT scale, not a boundary: the lanes sit inside the ordinary
+  // corridor, so the stage claims no extra width and the clamp is never
+  // holding anyone out over the ravine.
+  const half = 30;
+  const spans = 14;
+  const span = 15;
+  const length = spans * span + 12;
+  const endZ = z + length;
+
+  const lanes = [-0.55, 0, 0.55];
+  for (let i = 0; i < spans; i += 1) {
+    const atZ = z + 8 + i * span;
+    for (let l = 0; l < lanes.length; l += 1) {
+      const atX = half * (lanes[l] as number);
+      // A broken section, and never two lanes broken at the same span.
+      if ((i + l * 5) % 7 === 3) continue;
+
+      if (l === 1 && i % 3 === 1) {
+        // The swaying middle: shallow and slow, so it reads as timber flexing.
+        pushSinker(stage, atX, atZ, 13, 7, i * 1.7, 2.2);
+        continue;
+      }
+      pushBox(stage, 'plank', atX, COURSE.floorY - 0.7, atZ, 13, 0.7, span - 1.5);
+    }
+
+    // Rope posts either side of the middle bridge, and jungle beyond.
+    if (i % 2 === 0) {
+      for (const side of [-1, 1]) {
+        pushBox(stage, 'log', side * 8, COURSE.floorY, atZ, 1.6, 5, 1.6);
+      }
+    }
+    if (i % 2 === 1) {
+      decorations.push({
+        kind: 'tree',
+        stage,
+        x: (i % 4 === 1 ? -1 : 1) * (half - 5),
+        y: COURSE.floorY - 3,
+        z: atZ,
+        scale: 1.5,
+        rotationY: i * 0.7,
+      });
+    }
+    if (i % 4 === 2) pushArch(stage, 0, atZ + span * 0.5);
+  }
+  return endZ;
+};
+
+/**
+ * Stage 22: boulders rolling across a valley.
+ *
+ * The boulders sweep ACROSS the route rather than down it, so the stage is
+ * read left-to-right instead of head-on. Solid ground throughout and generous
+ * spacing between the rows: the danger is timing, and a player who waits is
+ * never punished for waiting.
+ */
+const buildBoulderValley = (stage: number, z: number): number => {
+  const half = 46;
+  const length = 260;
+  const endZ = z + length;
+  markWide(z, endZ, half);
+  pushFloor(stage, z, endZ, 'stone', COURSE.floorY, half);
+
+  const rows = 7;
+  for (let i = 0; i < rows; i += 1) {
+    const atZ = z + 26 + i * ((length - 50) / (rows - 1));
+    // Alternating direction and rate, so no two rows are the same wait.
+    const rate = (0.55 + i * 0.06) * (i % 2 === 0 ? 1 : -1);
+    hazards.push({
+      kind: 'sweeper',
+      stage,
+      x: 0,
+      y: COURSE.floorY + 5,
+      z: atZ,
+      radius: 5.5,
+      // Comfortably inside the arena: |x| + sweep + radius must fit.
+      sweep: half - 8,
+      rate,
+      phase: i * 1.35,
+      fromZ: 0,
+      toZ: 0,
+    });
+
+    // Cover to wait behind while a boulder goes past.
+    for (const fraction of [-0.62, 0.62]) {
+      pushBox(stage, 'stone', half * fraction, COURSE.floorY, atZ, 11, 4.5, 9);
+    }
+    decorations.push({
+      kind: 'rock',
+      stage,
+      x: half * (i % 2 === 0 ? -0.85 : 0.85),
+      y: COURSE.floorY,
+      z: atZ + 14,
+      scale: 1.6,
+      rotationY: i,
+    });
+  }
+  return endZ;
+};
+
+/**
+ * Stage 23: islands over nothing, with the gaps growing.
+ *
+ * The one stage in the game that is purely about JUDGING a jump: the gaps
+ * widen from comfortable to committing, and every one of them is sized against
+ * the reach a player actually has at this point in the ladder. The moving
+ * islands rise and sink, so the timing matters as much as the distance.
+ */
+const buildFloatingIslands = (stage: number, z: number): number => {
+  const half = 30;
+  const count = 12;
+  let at = z + 6;
+
+  for (let i = 0; i < count; i += 1) {
+    // Islands shrink and gaps grow, but both stop well short of unfair.
+    const size = 26 - i * 0.9;
+    const gap = 7 + i * 0.7;
+    const side = i % 3 === 0 ? 0 : i % 3 === 1 ? -0.42 : 0.42;
+    const atX = half * side;
+
+    const moving = i % 4 === 2;
+    if (moving) {
+      // A slow riser. Wide enough that arriving early is still a landing.
+      pushSinker(stage, atX, at + size / 2, size, 8, i * 2.1, 7);
+    } else {
+      pushBox(stage, 'stone', atX, COURSE.floorY - 1, at + size / 2, size, 1, size);
+    }
+
+    // A second island alongside. ALWAYS present when the first one moves, so
+    // no row is ever a wait with nothing to stand on - a moving island is a
+    // shortcut, never the only way across.
+    if (moving || i % 3 !== 0) {
+      const companion = moving ? size * 0.8 : size * 0.6;
+      pushBox(
+        stage,
+        'stone',
+        -atX || half * 0.42,
+        COURSE.floorY - 1,
+        at + size / 2,
+        companion,
+        1,
+        companion,
+      );
+    }
+    if (i % 5 === 0) {
+      decorations.push({
+        kind: 'tree', stage, x: atX, y: COURSE.floorY - 1, z: at + size / 2,
+        scale: 0.9, rotationY: i,
+      });
+    }
+    at += size + gap;
+  }
+  return at + 4;
+};
+
+/**
+ * Stage 24: a fortress standing in lava.
+ *
+ * The contrast is the mechanic. Everything safe is grey stone and everything
+ * fatal is bright and glowing, so the route reads at a glance from the far end
+ * - which is the only way a stage like this works at the speed a player
+ * arrives with.
+ */
+const buildLavaFortress = (stage: number, z: number): number => {
+  const half = 44;
+  const length = 250;
+  const endZ = z + length;
+  markWide(z, endZ, half);
+
+  quicksand.push({
+    stage,
+    surface: 'lava',
+    minX: -half,
+    maxX: half,
+    minZ: z,
+    maxZ: endZ,
+    surfaceY: -4,
+    deathY: -2.2,
+  });
+
+  // A causeway of stone, wide at the ends and broken in the middle.
+  const rows = 13;
+  const step = (length - 20) / rows;
+  for (let i = 0; i < rows; i += 1) {
+    const atZ = z + 12 + i * step;
+    if (i % 3 === 1) {
+      // Steppers that drop away, two lanes half a cycle apart.
+      for (let l = 0; l < 2; l += 1) {
+        pushSinker(stage, (l === 0 ? -1 : 1) * 12, atZ, 12, 6, l * 3 + i, 8);
+      }
+      continue;
+    }
+    const width = i % 3 === 0 ? 34 : 20;
+    pushBox(stage, 'stone', 0, COURSE.floorY - 0.9, atZ, width, 0.9, step * 0.72);
+
+    // Fortress walls flanking the causeway.
+    if (i % 2 === 0) {
+      for (const side of [-1, 1]) {
+        pushBox(stage, 'stone', side * (half - 6), COURSE.floorY - 4, atZ, 10, 16, 12);
+        decorations.push({
+          kind: 'torch', stage, x: side * (half - 6), y: COURSE.floorY + 12,
+          z: atZ, scale: 1.3, rotationY: 0,
+        });
+      }
+    }
+  }
+  return endZ;
+};
+
+/**
+ * Stage 25: a wood at four times the size.
+ *
+ * Two routes that rejoin: a wide ground road around the outside, and a narrow
+ * run over the fallen trunks straight up the middle. The trunks are quicker
+ * and have gaps in them; the road is safe and long. Both arrive at the same
+ * place, which is what makes it a choice rather than a trap.
+ */
+const buildGiantJungle = (stage: number, z: number): number => {
+  const half = 52;
+  const length = 280;
+  const endZ = z + length;
+  markWide(z, endZ, half);
+  pushFloor(stage, z, endZ, 'floor', COURSE.floorY, half);
+
+  // The fast route: fallen trunks up the middle, with real gaps.
+  let at = pushSteps(stage, z + 10, COURSE.floorY, 7, 20);
+  for (let i = 0; i < 8; i += 1) {
+    pushBox(stage, 'log', 0, 6, at + 12, 16, 1, 24);
+    at += 24 + 8;
+  }
+  pushSteps(stage, at - 8, 7, COURSE.floorY, 20);
+
+  // Giant roots arching over the ground road, and trees to dwarf everything.
+  for (let i = 0; i < 9; i += 1) {
+    const atZ = z + 20 + i * 29;
+    const side = i % 2 === 0 ? -1 : 1;
+    pushBox(stage, 'log', side * half * 0.62, COURSE.floorY, atZ, 26, 3.4, 7);
+    decorations.push({
+      kind: 'tree', stage, x: side * (half - 7), y: COURSE.floorY, z: atZ,
+      scale: 2.4, rotationY: i * 0.8,
+    });
+    if (i % 3 === 0) {
+      decorations.push({
+        kind: 'rock', stage, x: -side * half * 0.5, y: COURSE.floorY, z: atZ + 12,
+        scale: 1.8, rotationY: i,
+      });
+    }
+  }
+  return endZ;
+};
+
+/**
+ * Stage 26: ice, uphill.
+ *
+ * Grip is 0.45 rather than the ice run's 0.3. That stage was the lesson; this
+ * one is the exam, and an exam taken at six times the movement speed needs
+ * MORE control, not less - low grip and long jumps together is where a stage
+ * stops being hard and starts being a dice roll.
+ */
+const buildIceMountain = (stage: number, z: number): number => {
+  const half = 28;
+  const ledges = 10;
+  let at = z + 6;
+
+  for (let i = 0; i < ledges; i += 1) {
+    const size = 30 - i * 0.8;
+    const gap = 6 + i * 0.5;
+    const height = i * 0.9;
+    const atX = half * (i % 2 === 0 ? -0.3 : 0.3);
+
+    pushBox(stage, 'ice', atX, COURSE.floorY - 3 + height, at + size / 2, size, 3, size);
+    pushSurface(stage, at, at + size, half, 0.45);
+
+    if (i % 3 === 2) {
+      // A separated ledge to jump to, slightly off the line.
+      pushBox(stage, 'ice', -atX, COURSE.floorY - 3 + height, at + size / 2, size * 0.55, 3, size * 0.55);
+    } else if (i % 4 === 1) {
+      // The moving ice, and only ever ALONGSIDE the fixed ledge above - the
+      // climb itself never depends on catching one. AT THE LEDGE'S HEIGHT:
+      // this stage climbs, and a platform left at floor level would be metres
+      // below the route rather than beside it.
+      pushSinker(stage, -atX, at + size / 2, 14, 7, i * 2.3, 8, COURSE.floorY + height);
+    }
+    decorations.push({
+      kind: 'rock', stage, x: half * (i % 2 === 0 ? 0.8 : -0.8),
+      y: COURSE.floorY + height, z: at + size / 2, scale: 1.4, rotationY: i,
+    });
+    at += size + gap;
+  }
+  return at + 4;
+};
+
+/**
+ * Stage 27: the temple, at scale.
+ *
+ * Stage 18's masonry with more of everything: statues to run between, floors
+ * that give way, and a crusher in every second doorway. The colonnade is what
+ * makes it readable - the route is always the gap between two statues.
+ */
+const buildGrandTemple = (stage: number, z: number): number => {
+  const half = 46;
+  const bays = 9;
+  const spacing = 32;
+  const length = bays * spacing + 24;
+  const endZ = z + length;
+  markWide(z, endZ, half);
+
+  const trapHalfZ = 10;
+  let laid = z;
+
+  for (let bay = 0; bay < bays; bay += 1) {
+    const atZ = z + 20 + bay * spacing;
+
+    // Statues: a plinth and a body, flanking the route.
+    for (const side of [-1, 1]) {
+      pushBox(stage, 'stone', side * half * 0.66, COURSE.floorY, atZ, 9, 3, 9);
+      pushBox(stage, 'stone', side * half * 0.66, COURSE.floorY + 3, atZ, 6, 12, 6);
+    }
+    pushArch(stage, 0, atZ);
+
+    if (bay % 2 === 0) {
+      pushFaller(stage, 0, atZ, 5, 17, 2.7, bay * 0.8);
+      continue;
+    }
+
+    // A bay whose floor gives way: three lanes, a third of a cycle apart.
+    pushFloor(stage, laid, atZ - trapHalfZ, 'floor', COURSE.floorY, half);
+    laid = atZ + trapHalfZ;
+
+    // The long way round, and the reason the clamp at the arena edge is
+    // standing on something.
+    for (const side of [-1, 1]) {
+      pushBox(
+        stage,
+        'stone',
+        side * (half - 7),
+        COURSE.floorY - 0.6,
+        atZ,
+        14,
+        0.6,
+        trapHalfZ * 2,
+      );
+    }
+    for (let l = 0; l < 3; l += 1) {
+      pushSinker(stage, (l - 1) * 15, atZ, 14, 6, bay + l * 2, 9);
+    }
+  }
+  pushFloor(stage, laid, endZ, 'floor', COURSE.floorY, half);
+  return endZ;
+};
+
+/**
+ * Stage 28: a run through a storm.
+ *
+ * The wind reverses section by section and every section is the same length,
+ * so it is a rhythm to learn rather than a surprise. Platforms in open sky
+ * with real gaps - the wind decides where a jump lands, which is the whole
+ * point of putting one over a drop.
+ */
+const buildStormRun = (stage: number, z: number): number => {
+  const half = 30;
+  const sections = 9;
+  const platform = 28;
+  const gap = 9;
+  let at = z + 6;
+
+  for (let i = 0; i < sections; i += 1) {
+    const atX = half * (i % 2 === 0 ? -0.28 : 0.28);
+    pushBox(stage, 'stone', atX, COURSE.floorY - 1, at + platform / 2, 30, 1, platform);
+
+    // Predictable, and signposted by the post at the windward edge.
+    surfaces.push({
+      stage,
+      minX: -half,
+      maxX: half,
+      minZ: at,
+      maxZ: at + platform,
+      grip: 0.9,
+      windX: (i % 2 === 0 ? 1 : -1) * (15 + i * 1.4),
+      windZ: 0,
+    });
+    pushBox(stage, 'metal', atX + (i % 2 === 0 ? -16 : 16), COURSE.floorY - 1, at + platform / 2, 2, 8, 2);
+
+    if (i % 3 === 1) {
+      pushSinker(stage, -atX, at + platform / 2, 13, 7, i * 2.2, 8);
+    }
+    at += platform + gap;
+  }
+  return at + 4;
+};
+
+/**
+ * Stage 29: everything at once, in a room.
+ *
+ * Not a corridor of set pieces like the Chaos Run - one large arena with four
+ * hazards live at the same time and a lava channel through the middle of it.
+ * The difference between hard and unfair here is SIGHTLINES, so the arena is
+ * open and every hazard is visible from the entrance.
+ */
+const buildFinalChaos = (stage: number, z: number): number => {
+  const half = 54;
+  const length = 300;
+  const endZ = z + length;
+  markWide(z, endZ, half);
+  pushFloor(stage, z, endZ, 'stone', COURSE.floorY, half);
+
+  // A lava channel across the middle, crossed on steppers.
+  const channelZ = z + length * 0.5;
+  quicksand.push({
+    stage,
+    surface: 'lava',
+    minX: -half,
+    maxX: half,
+    minZ: channelZ - 26,
+    maxZ: channelZ + 26,
+    surfaceY: -4,
+    deathY: -2.2,
+  });
+  for (let l = 0; l < 4; l += 1) {
+    const atX = (l - 1.5) * 24;
+    pushBox(stage, 'stone', atX, COURSE.floorY - 0.9, channelZ - 14, 12, 0.9, 12);
+    pushSinker(stage, atX, channelZ + 2, 12, 6, l * 1.5, 8);
+    pushBox(stage, 'stone', atX, COURSE.floorY - 0.9, channelZ + 18, 12, 0.9, 12);
+  }
+
+  // Spinners before the channel, rollers after it.
+  for (let i = 0; i < 3; i += 1) {
+    const atZ = z + 40 + i * 40;
+    const cx = half * (i % 2 === 0 ? -0.16 : 0.16);
+    pushSpinArm(stage, 'spinner', cx, atZ, COURSE.floorY + 2.8, 5, 28, 3, (i % 2 === 0 ? 1 : -1) * 0.7, i * 1.3);
+    pushBox(stage, 'pillar', cx, COURSE.floorY, atZ, 5, 7, 5);
+  }
+  for (let i = 0; i < 2; i += 1) {
+    hazards.push({
+      kind: 'roller',
+      stage,
+      x: (i === 0 ? -1 : 1) * 18,
+      y: COURSE.floorY + 5.4,
+      z: 0,
+      radius: 5.4,
+      sweep: 0,
+      rate: 30,
+      phase: i * 45,
+      fromZ: endZ,
+      toZ: channelZ + 30,
+    });
+  }
+  for (let row = 0; row < 3; row += 1) {
+    const atZ = channelZ + 46 + row * 34;
+    for (const fraction of [-0.6, -0.2, 0.2, 0.6]) {
+      if ((row + Math.round(fraction * 5) + 10) % 4 === 0) continue;
+      pushFaller(stage, half * fraction, atZ, 3.6, 24, 3.1, row * 1.2 + fraction * 3);
+    }
+  }
+  return endZ;
+};
+
+/**
+ * Stage 30: the summit.
+ *
+ * Three movements that get harder as they climb, then the top. The summit
+ * itself is a broad raised plateau ringed with torches - somewhere to stand
+ * and see how far the course came - and the way down from it is a wide
+ * staircase straight onto the finish pad, so the last thing the player has to
+ * do is the easiest thing in the stage. Ending a thirty-stage climb on a
+ * precision jump would be a way to lose the run at the very end.
+ */
+const buildFinalSummit = (stage: number, z: number): number => {
+  const half = 56;
+  let at = z;
+
+  // One: the approach, over a water gorge on rising stone. Corridor width, so
+  // the water runs wall to wall and the boundary is never over open air.
+  const gorge = 130;
+  quicksand.push({
+    stage,
+    surface: 'water',
+    minX: -COURSE.halfWidth,
+    maxX: COURSE.halfWidth,
+    minZ: at,
+    maxZ: at + gorge,
+    surfaceY: -6,
+    deathY: -3.5,
+  });
+  for (let i = 0; i < 9; i += 1) {
+    const atZ = at + 10 + i * 14;
+    for (const fraction of [-0.36, 0, 0.36]) {
+      if ((i + Math.round(fraction * 5) + 8) % 3 === 0 && fraction !== 0) continue;
+      const atX = half * fraction;
+      if (i % 3 === 1 && fraction !== 0) {
+        pushSinker(stage, atX, atZ, 13, 6.5, i + fraction * 6, 8);
+      } else {
+        pushBox(stage, 'stone', atX, COURSE.floorY - 1, atZ, 13, 1, 13);
+      }
+    }
+    if (i % 4 === 0) {
+      decorations.push({
+        kind: 'waterfall', stage, x: (i % 8 === 0 ? -1 : 1) * (half - 2),
+        y: COURSE.floorY + 14, z: atZ, scale: 1.6,
+        rotationY: i % 8 === 0 ? Math.PI / 2 : -Math.PI / 2,
+      });
+    }
+  }
+  at += gorge;
+
+  // Two: the gauntlet, on solid ground, with everything the game has.
+  const gauntlet = 210;
+  markWide(at, at + gauntlet, half);
+  pushFloor(stage, at, at + gauntlet, 'stone', COURSE.floorY, half);
+  for (let i = 0; i < 4; i += 1) {
+    const atZ = at + 26 + i * 48;
+    const side = i % 2 === 0 ? -1 : 1;
+    pushSpinArm(stage, 'spinner', side * half * 0.15, atZ, COURSE.floorY + 3.4, 6, 30, 3, side * 0.66, i * 1.4);
+    pushSpinArm(stage, 'spinner', side * half * 0.15, atZ, COURSE.floorY + 3.4, 32, 38, 4.2, side * 0.66, i * 1.4);
+    pushBox(stage, 'metal', side * half * 0.15, COURSE.floorY, atZ, 6, 9, 6);
+  }
+  for (let i = 0; i < 3; i += 1) {
+    hazards.push({
+      kind: 'tornado',
+      stage,
+      x: half * (i % 2 === 0 ? 0.18 : -0.18),
+      y: COURSE.floorY + 7,
+      z: at + 50 + i * 56,
+      radius: 6.5,
+      sweep: 24,
+      rate: i % 2 === 0 ? 0.38 : -0.34,
+      phase: i * 1.7,
+      fromZ: 0,
+      toZ: 0,
+    });
+  }
+  for (let row = 0; row < 4; row += 1) {
+    const atZ = at + 34 + row * 46;
+    for (const fraction of [-0.68, -0.24, 0.24, 0.68]) {
+      if ((row + Math.round(fraction * 4) + 8) % 4 === 0) continue;
+      pushFaller(stage, half * fraction, atZ, 3.6, 26, 3.2, row * 1.1 + fraction * 4);
+    }
+  }
+  at += gauntlet;
+
+  // Three: the climb to the summit, and the summit itself.
+  const climbTop = 14;
+  at = pushSteps(stage, at, COURSE.floorY, climbTop, COURSE.halfWidth * 2);
+
+  const plateau = 90;
+  markWide(at, at + plateau, half);
+  pushFloor(stage, at, at + plateau, 'stone', climbTop, half);
+  for (let i = 0; i < 12; i += 1) {
+    const angle = (i / 12) * Math.PI * 2;
+    decorations.push({
+      kind: 'torch',
+      stage,
+      x: Math.cos(angle) * (half - 6),
+      y: climbTop,
+      z: at + plateau / 2 + Math.sin(angle) * (plateau / 2 - 8),
+      scale: 1.6,
+      rotationY: 0,
+    });
+  }
+  for (const side of [-1, 1]) {
+    pushArch(stage, side * 22, at + plateau * 0.28);
+    pushBox(stage, 'stone', side * (half - 8), climbTop, at + plateau * 0.7, 10, 14, 10);
+  }
+  at += plateau;
+
+  // And down onto the finish, wide and gentle - the last thing a thirty-stage
+  // climb should ask for is not a precision jump.
+  return pushSteps(stage, at, climbTop, COURSE.floorY, COURSE.halfWidth * 2);
+};
+
 /** Running build cursor. Each stage begins exactly where the last one ended. */
 let cursorZ: number = FIRST_STAGE_Z;
 
@@ -2140,8 +2803,6 @@ for (let stageIndex = 0; stageIndex < COURSE.stageCount; stageIndex += 1) {
   let z = startZ;
 
   pushFloor(stageIndex, z, z + START_RUNWAY);
-  // A chevron strip on the run-up: presentation for "this is where you go".
-  pushBox(stageIndex, 'boost', 0, COURSE.floorY, startZ + 11, lane(0.62), 0.06, 16);
   z += START_RUNWAY;
 
   switch (stageIndex) {
@@ -2202,8 +2863,38 @@ for (let stageIndex = 0; stageIndex < COURSE.stageCount; stageIndex += 1) {
     case 18:
       z = buildChaosRun(stageIndex, z);
       break;
-    default:
+    case 19:
       z = buildFinalArena(stageIndex, z);
+      break;
+    case 20:
+      z = buildJungleBridge(stageIndex, z);
+      break;
+    case 21:
+      z = buildBoulderValley(stageIndex, z);
+      break;
+    case 22:
+      z = buildFloatingIslands(stageIndex, z);
+      break;
+    case 23:
+      z = buildLavaFortress(stageIndex, z);
+      break;
+    case 24:
+      z = buildGiantJungle(stageIndex, z);
+      break;
+    case 25:
+      z = buildIceMountain(stageIndex, z);
+      break;
+    case 26:
+      z = buildGrandTemple(stageIndex, z);
+      break;
+    case 27:
+      z = buildStormRun(stageIndex, z);
+      break;
+    case 28:
+      z = buildFinalChaos(stageIndex, z);
+      break;
+    default:
+      z = buildFinalSummit(stageIndex, z);
       break;
   }
 
@@ -2264,7 +2955,23 @@ export const DECORATIONS: readonly Decoration[] = decorations;
 /** Every stage, in order. */
 export const STAGES: readonly StageDefinition[] = stages;
 
-/** Z past which there is no more world. Movement is clamped to it. */
+/**
+ * THE HARD END OF THE GAME. Z past which there is no more world.
+ *
+ * Sits past the Level 30 finish pad, so it never interferes with the last
+ * stage - the player banks the final win and is returned to the arena long
+ * before this matters.
+ *
+ * It is a CLAMP rather than a wall, and that is what makes it absolute:
+ * `clampToBounds` applies it to the RESULT of every substep, after the move
+ * has already integrated, so no speed outruns it the way a collider could be
+ * tunnelled. It constrains Z and says nothing about Y, so there is no top to
+ * jump over; it applies at every X, so there is no way around the side; and it
+ * is not geometry, so there is nothing to see or to destroy.
+ *
+ * `verify-barrier` charges it from every level, rebirth count and offset the
+ * game can produce - over 2000 units a second - and asserts nothing passes.
+ */
 export const COURSE_END_Z: number =
   (stages[stages.length - 1]?.endZ ?? COURSE.lobbyEndZ) - 2;
 

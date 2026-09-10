@@ -1,0 +1,31 @@
+# Keep the build context small and the image reproducible.
+#
+# node_modules especially: the image installs its own from the lockfile, and
+# shipping a host's tree in would send hundreds of megabytes over the docker
+# socket and risk platform-specific binaries built for the wrong OS.
+node_modules
+**/node_modules
+
+# Build outputs. The image compiles its own; a stale local `dist` copied in
+# would silently win over the one that was just built.
+dist
+**/dist
+
+.git
+.github
+.vscode
+.claude
+
+# The client is deployed to Bloxity Hosting as static files, not baked into
+# the server image.
+client
+
+# Player profiles are runtime state and belong on a mounted volume.
+server/data
+
+*.log
+.env
+.DS_Store
+netlify.toml
+README.md
+CLAUDE.md

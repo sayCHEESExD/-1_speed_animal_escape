@@ -207,6 +207,37 @@ than failing with a socket error.
 Because the page is served over https, the endpoint must be `wss://` - a
 browser will not open an insecure socket from a secure page.
 
+### Bloxity Hosting (GitHub Actions)
+
+`.github/workflows/deploy.yml` deploys both halves on a push:
+
+| Branch          | Channel |
+| --------------- | ------- |
+| `dev`           | `dev`   |
+| `main`/`master` | `prod`  |
+
+The server is built from the repo-root `Dockerfile` - the build context has to
+be the root, because the server imports `@animal/shared` as a workspace
+dependency - pushed to `ghcr.io/saycheesexd/animal-obby-escape-server`, and
+deployed by DIGEST rather than by tag, so a re-run cannot ship an image a later
+push replaced. The client is built with `VITE_BLOXITY_GAME_ID`, gated on
+`typecheck`, `verify` and the 12 MB budget, then uploaded.
+
+Set these in the repository (Settings -> Secrets and variables -> Actions):
+
+| Name                  | Kind     | Purpose                                  |
+| --------------------- | -------- | ---------------------------------------- |
+| `LEGION_DEPLOY_TOKEN` | secret   | Authenticates both deploy calls.          |
+| `SERVER_URL_DEV`      | variable | `wss://…` for the dev channel's client.   |
+| `SERVER_URL_PROD`     | variable | `wss://…` for the prod channel's client.  |
+| `LEGION_DEPLOY_PATH`  | variable | Override if the server deploy route differs. |
+| `LEGION_UPLOAD_PATH`  | variable | Override if the client upload route differs. |
+
+The two path variables exist because Bloxity's public docs cover the browser
+SDK only and publish no hosting API: the defaults in the workflow are a
+best guess, and the deploy steps print the request and the response so the
+first run says exactly what to correct.
+
 ### 3. Check it
 
 ```bash
@@ -218,10 +249,35 @@ is routed to a second room.
 
 ---
 
+## Bloxity
+
+The game integrates the [Bloxity](https://bloxity.io) portal SDK: one account
+across games, friends and invites, avatar cosmetics, settings that follow you,
+and the Bux currency. It runs the same code embedded in an iframe on bloxity.io
+and hosted standalone - the SDK detects which and routes accordingly.
+
+`client/src/bloxity/Bloxity.ts` is the only file that touches the SDK. If the
+script is blocked or offline the game boots and plays exactly as before and the
+account chip reads "Playing offline"; nothing else changes.
+
+**Bux never grant anything on the client.** The client asks for a SKU - never a
+price - and the purchase is fulfilled server to server: Bloxity posts to
+`/bloxity/bux`, the server queues the grant against the Bloxity account, and the
+room hands it over through the same `wallet.add` every stage reward uses. The
+webhook answers 2xx for anything it has safely recorded, including a SKU this
+build does not know, because Bloxity refunds what fails and a catalogue that
+moved ahead of a deploy must not cost a player their purchase.
+
+| Variable                  | Needed | Meaning                                        |
+| ------------------------- | ------ | ---------------------------------------------- |
+| `BLOXITY_WEBHOOK_SECRET`  | prod   | Verifies `x-legion-webhook-secret` on the webhook. Without it the endpoint accepts anything. |
+
+---
+
 ## Notes for the curious
 
 **Nothing in the world is an image.** The studded green ground, the salmon
-brick walls, the plank bridges, the gold finish pads, the treadmill chevrons,
+brick walls, the plank bridges, the gold finish pads, the treadmill belts,
 every word of world text and the cloudy sky are all drawn on a canvas at
 runtime. The only pictures in the build are the supplied rider model and four
 HUD icons.
@@ -282,12 +338,15 @@ both exist - and ranked on the server, on a slow timer, because nobody reads a
 leaderboard twenty times a second. Players have no names, so a handle is
 derived from their id deterministically; the id itself never leaves the server.
 
-**Nothing you hear is a file either.** Music and every sound effect are
-synthesised with oscillators and envelopes: one context, one music voice
-scheduled ahead into Web Audio's own clock, a per-sound cooldown and a hard
-voice ceiling on the one-shots, and only the local player making any noise at
-all. A music track would have been the single easiest way to spend the whole
-12 MB budget.
+**Every sound effect is synthesised**, with oscillators and envelopes: one
+context, a per-sound cooldown and a hard voice ceiling on the one-shots, and
+only the local player making any noise at all. A pack of wavs would have been
+the easiest way to spend the whole 12 MB budget.
+
+The background music is the one supplied audio file, streamed from
+`assets/audio/` through the same music bus - so the portal's music slider, the
+master volume and mute all work on it without knowing it is a file rather than
+a tune the game made up.
 
 **Escape gives you your cursor, and lets you keep it.** Pointer lock hides the
 cursor and every menu opens from a rail tile, so a released lock used to be

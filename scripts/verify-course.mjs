@@ -60,7 +60,6 @@ const walkableSpans = () => {
   // vanishing bridge is made of nothing else - and leaving them out reported
   // that whole stage as one 239-unit hole no player could jump.
   const spans = [...COURSE_SOLIDS, ...SINKING_SOLIDS]
-    .filter((solid) => solid.kind !== 'boost')
     .map((solid) => [solid.minZ, solid.maxZ])
     .sort((a, b) => a[0] - b[0]);
 
@@ -76,7 +75,7 @@ const walkableSpans = () => {
 /** Z ranges where floor exists but not on the centre line - a plank crossing. */
 const narrowCrossings = () => {
   const centre = [...COURSE_SOLIDS, ...SINKING_SOLIDS].filter(
-    (s) => s.kind !== 'boost' && s.minX <= 0 && s.maxX >= 0,
+    (s) => s.minX <= 0 && s.maxX >= 0,
   );
   const covered = (z) => centre.some((s) => z >= s.minZ && z <= s.maxZ);
   const found = [];
@@ -342,16 +341,24 @@ console.log('sinking platforms');
   const rowKey = (z) => Math.round(z / 4) * 4;
 
   for (const solid of COURSE_SOLIDS) {
-    // Anything solid and roughly at floor level counts as a fixed platform.
-    if (solid.kind === 'boost' || solid.maxY > COURSE.floorY + 0.3) continue;
-    if (solid.maxY < COURSE.floorY - 2) continue;
+    /*
+     * Anything solid and standable counts as a fixed platform, at ANY height.
+     *
+     * This used to insist on floor level, which was true of the course when
+     * it was written and stopped being true the moment stages started to
+     * climb: the ice mountain's ledges rise a step per row, so its perfectly
+     * solid ground read as "no fixed platform in this row" and the sinking
+     * ledge beside it looked like the only way across. Height is recorded
+     * instead, and compared per row below - a platform only helps if it is at
+     * the height the row is actually crossed at.
+     */
     const key = `${solid.stage}:${rowKey((solid.minZ + solid.maxZ) / 2)}`;
-    if (!rows.has(key)) rows.set(key, { fixed: 0, sinking: [] });
-    rows.get(key).fixed += 1;
+    if (!rows.has(key)) rows.set(key, { fixed: [], sinking: [] });
+    rows.get(key).fixed.push(solid.maxY);
   }
   for (const platform of SINKING_SOLIDS) {
     const key = `${platform.stage}:${rowKey((platform.minZ + platform.maxZ) / 2)}`;
-    if (!rows.has(key)) rows.set(key, { fixed: 0, sinking: [] });
+    if (!rows.has(key)) rows.set(key, { fixed: [], sinking: [] });
     rows.get(key).sinking.push(platform);
   }
 
@@ -363,7 +370,10 @@ console.log('sinking platforms');
   let sampled = 0;
   for (const [key, row] of rows) {
     if (row.sinking.length === 0) continue;
-    if (row.fixed > 0) continue;
+    // A fixed platform rescues the row only if it is at the height the row is
+    // crossed at - one twenty units below is a different part of the world.
+    const crossingY = Math.max(...row.sinking.map((s) => s.maxY));
+    if (row.fixed.some((top) => Math.abs(top - crossingY) <= 3)) continue;
     sampled += 1;
     const cycle = Math.max(...row.sinking.map((s) => s.cycle));
     let worst = null;
@@ -432,10 +442,17 @@ console.log('wide areas');
   for (const area of WIDE_AREAS) {
     const midZ = (area.minZ + area.maxZ) / 2;
     const edge = area.halfWidth - 0.5;
+    /*
+     * Ground at the edge, at ANY height.
+     *
+     * The height test here was the same floor-level assumption, and the final
+     * summit is the case that broke it: a plateau fourteen units up is still
+     * ground, and a boundary standing on it is standing on something. What
+     * this rule exists to catch is a clamp over NOTHING, not a clamp over
+     * something high.
+     */
     const covered = COURSE_SOLIDS.some(
       (s) =>
-        s.kind !== 'boost' &&
-        s.maxY <= COURSE.floorY + 0.2 &&
         edge >= s.minX &&
         edge <= s.maxX &&
         midZ >= s.minZ &&

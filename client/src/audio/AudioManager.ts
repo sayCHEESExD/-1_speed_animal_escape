@@ -3,8 +3,17 @@ import { logger } from '../util/logger.js';
 const SCOPE = 'audio';
 
 /** Master volumes per category. Music sits well under the gameplay sounds. */
-const MUSIC_GAIN = 0.16;
+const MUSIC_GAIN = 0.55;
 const SFX_GAIN = 0.34;
+
+/**
+ * The background track.
+ *
+ * Served from the repo-level `assets/` folder, which Vite publishes as the web
+ * root - so this path is what the file is reachable at, in dev and in the
+ * build alike.
+ */
+const MUSIC_URL = '/audio/background_music.mp3';
 
 /**
  * Most one-shot voices allowed to sound at once.
@@ -16,6 +25,10 @@ const SFX_GAIN = 0.34;
  * the twenty-first simultaneous hoofbeat is inaudible anyway.
  */
 const MAX_VOICES = 12;
+
+/** Keep a slider inside 0..1 whatever the portal sent. */
+const clamp01 = (value: number): number =>
+  Number.isFinite(value) ? Math.min(Math.max(value, 0), 1) : 1;
 
 /** Seconds a given sound refuses to retrigger, so nothing can machine-gun. */
 const COOLDOWNS: Readonly<Record<SoundName, number>> = {
@@ -39,27 +52,21 @@ export type SoundName =
   | 'rebirth'
   | 'claim';
 
-/** One bar of the loop: semitone offsets from the root, and their beat. */
-interface Note {
-  readonly beat: number;
-  readonly semitone: number;
-  readonly length: number;
-}
-
 /**
  * Every sound in the game, synthesised.
  *
- * There is not one audio file in the build, for the same reason there is not
- * one image file: the whole style is a handful of shapes drawn at runtime, and
- * a music track is the single easiest way to spend the entire 12 MB budget.
- * Oscillators and envelopes cost bytes measured in the hundreds.
+ * Every SOUND EFFECT is synthesised - oscillators and envelopes cost bytes
+ * measured in the hundreds, and a pack of wavs is the easiest way to spend the
+ * 12 MB budget. The background music is the one deliberate exception: a
+ * supplied track, streamed from `assets/audio/`, because a tune is the one
+ * thing an oscillator cannot fake convincingly.
  *
  * THREE rules hold the whole thing together:
  *
- *  - ONE context, ONE music voice. The loop is scheduled ahead on a timer and
- *    is the only thing that persists; there is no path that can start a second
- *    copy of it, which is what makes the doubled-music bug impossible rather
- *    than merely unlikely.
+ *  - ONE context, ONE music voice. The track is an `<audio>` element created
+ *    once behind the `started` flag and routed through `musicBus`, so there is
+ *    no path that can start a second copy of it - which is what makes the
+ *    doubled-music bug impossible rather than merely unlikely.
  *  - ONE-SHOTS ARE BOUNDED, twice: a per-sound cooldown stops the same effect
  *    retriggering every frame, and a hard voice ceiling stops the mix from
  *    ever containing more than a dozen of them.
@@ -82,13 +89,24 @@ export class AudioManager {
   /** Wall-clock of the last play, per sound. */
   private readonly lastPlayed = new Map<SoundName, number>();
 
-  private musicTimer = 0;
-  /** Context time the loop has been scheduled up to. */
-  private scheduledTo = 0;
-  private bar = 0;
+  /**
+   * The music, as a streaming element rather than a decoded buffer.
+   *
+   * `decodeAudioData` would hold the whole track in memory uncompressed - a
+   * three-minute stereo file is over thirty megabytes once decoded, for
+   * something that is only ever played start to finish. An element streams it,
+   * loops it natively, and still routes through Web Audio, which is what keeps
+   * the portal's music slider and the mute working.
+   */
+  private musicElement: HTMLAudioElement | null = null;
+  private musicSource: MediaElementAudioSourceNode | null = null;
 
   private muted = false;
   private started = false;
+
+  /** The portal's master and music sliders, 0..1. Both default to full. */
+  private masterLevel = 1;
+  private musicLevel = 1;
 
   /**
    * Bring the audio up, on a real user gesture.
@@ -112,11 +130,14 @@ export class AudioManager {
       }
 
       this.master = this.context.createGain();
-      this.master.gain.value = 1;
+      // Built at the level the portal has ALREADY set: settings arrive before
+      // the first user gesture, so a context created at full volume would be
+      // loud for exactly as long as it took the next slider change to arrive.
+      this.master.gain.value = this.muted ? 0 : this.masterLevel;
       this.master.connect(this.context.destination);
 
       this.musicBus = this.context.createGain();
-      this.musicBus.gain.value = MUSIC_GAIN;
+      this.musicBus.gain.value = MUSIC_GAIN * this.musicLevel;
       this.musicBus.connect(this.master);
 
       this.sfxBus = this.context.createGain();
@@ -128,12 +149,14 @@ export class AudioManager {
 
     if (!this.started) {
       this.started = true;
-      this.scheduledTo = this.context.currentTime + 0.1;
-      // A lookahead scheduler rather than a note-by-note timer: `setInterval`
-      // drifts and stalls in a background tab, and the whole point of
-      // scheduling into Web Audio's own clock is that the beat does not.
-      this.musicTimer = window.setInterval(() => this.pumpMusic(), 120);
+      this.startMusic();
       logger.info(SCOPE, 'audio started');
+    }
+
+    // A tab that was backgrounded pauses the element; resuming has to restart
+    // it, and `play()` on an already-playing element is a no-op.
+    if (this.musicElement && !this.muted) {
+      void this.musicElement.play().catch(() => undefined);
     }
   }
 
@@ -144,9 +167,48 @@ export class AudioManager {
   /** Silence everything, or bring it back. The music keeps its own time. */
   setMuted(muted: boolean): void {
     this.muted = muted;
-    if (this.master && this.context) {
-      this.master.gain.setTargetAtTime(muted ? 0 : 1, this.context.currentTime, 0.05);
+    this.applyMaster();
+  }
+
+  /**
+   * The portal's master volume, 0..1.
+   *
+   * Kept SEPARATE from mute rather than folded into it: they are two different
+   * statements - "I set this to 30%" and "silence, now" - and a mute that
+   * overwrote the level would hand back the wrong one when it lifted. The
+   * master gain is the product of the two, so unmuting restores whatever the
+   * slider said.
+   */
+  setMasterVolume(level: number): void {
+    this.masterLevel = clamp01(level);
+    this.applyMaster();
+  }
+
+  /** The portal's music volume, 0..1, against the game's own tuned mix. */
+  setMusicVolume(level: number): void {
+    this.musicLevel = clamp01(level);
+    if (this.musicBus && this.context) {
+      this.musicBus.gain.setTargetAtTime(
+        MUSIC_GAIN * this.musicLevel,
+        this.context.currentTime,
+        0.05,
+      );
     }
+  }
+
+  private applyMaster(): void {
+    if (this.master && this.context) {
+      const target = this.muted ? 0 : this.masterLevel;
+      this.master.gain.setTargetAtTime(target, this.context.currentTime, 0.05);
+    }
+
+    // A muted stream is PAUSED, not merely silenced. Leaving it running would
+    // keep decoding a file nobody can hear, and on a phone that is battery
+    // spent on nothing.
+    const element = this.musicElement;
+    if (!element) return;
+    if (this.muted) element.pause();
+    else void element.play().catch(() => undefined);
   }
 
   toggleMuted(): boolean {
@@ -205,8 +267,16 @@ export class AudioManager {
   }
 
   dispose(): void {
-    if (this.musicTimer) window.clearInterval(this.musicTimer);
-    this.musicTimer = 0;
+    if (this.musicElement) {
+      this.musicElement.pause();
+      // Dropping the src releases the network request and the decoder; an
+      // element left holding a stream keeps both alive after the game is gone.
+      this.musicElement.removeAttribute('src');
+      this.musicElement.load();
+    }
+    this.musicSource?.disconnect();
+    this.musicSource = null;
+    this.musicElement = null;
     this.started = false;
     void this.context?.close().catch(() => undefined);
     this.context = null;
@@ -218,92 +288,49 @@ export class AudioManager {
   // -------------------------------------------------------------- the music
 
   /**
-   * The loop: a four-bar bounce in A major.
+   * Start the background track.
    *
-   * Bass on every beat, a bright arpeggio over it, and a chord change every
-   * bar. Written as data rather than as code so the tune is one table to edit,
-   * and short enough that the loop point falls on a bar line - which is the
-   * whole of "loops cleanly".
+   * Called ONCE, from the first `resume()`, which is the first real user
+   * gesture - browsers refuse to play audio before one. The `started` flag is
+   * what makes a second copy of the track impossible rather than merely
+   * unlikely, and it is the same flag the synthesised loop used to rely on.
+   *
+   * The element is routed through `musicBus`, not straight to the speakers, so
+   * everything already built on top of that bus keeps working untouched: the
+   * portal's `music_volume` slider, the master volume, and mute.
    */
-  private pumpMusic(): void {
+  private startMusic(): void {
     const ctx = this.context;
     const bus = this.musicBus;
-    if (!ctx || !bus || ctx.state !== 'running') return;
+    if (!ctx || !bus || this.musicElement) return;
 
-    const beat = 60 / 128;
-    const barLength = beat * 4;
-    // Schedule half a second ahead. Enough that a stalled timer cannot cause a
-    // gap, short enough that a mute is heard almost at once.
-    while (this.scheduledTo < ctx.currentTime + 0.5) {
-      this.scheduleBar(this.scheduledTo, barLength, beat);
-      this.scheduledTo += barLength;
-      this.bar = (this.bar + 1) % 4;
+    try {
+      const element = new Audio();
+      // Loop BEFORE the source is set, so the very first pass round is
+      // seamless rather than the one gap the player hears.
+      element.loop = true;
+      element.preload = 'auto';
+      // The element's own volume stays at 1: the mix belongs to `musicBus`,
+      // and two independent volume controls on one sound is one too many.
+      element.volume = 1;
+      element.crossOrigin = 'anonymous';
+      element.src = MUSIC_URL;
+
+      const source = ctx.createMediaElementSource(element);
+      source.connect(bus);
+
+      this.musicElement = element;
+      this.musicSource = source;
+
+      if (!this.muted) void element.play().catch(() => undefined);
+
+      element.addEventListener('error', () => {
+        logger.warn(SCOPE, `background music failed to load from ${MUSIC_URL}`);
+      });
+    } catch (error) {
+      // No music is a worse game, not a broken one.
+      logger.warn(SCOPE, `could not start background music: ${String(error)}`);
     }
-  }
-
-  private scheduleBar(at: number, barLength: number, beat: number): void {
-    // I - vi - IV - V, the most cheerful four bars in existence, which is
-    // exactly the register this game is in.
-    const roots = [0, -3, -7, -5];
-    const root = roots[this.bar] as number;
-
-    const melody: readonly Note[] = [
-      { beat: 0, semitone: 12, length: 0.9 },
-      { beat: 0.5, semitone: 16, length: 0.4 },
-      { beat: 1, semitone: 19, length: 0.9 },
-      { beat: 1.5, semitone: 16, length: 0.4 },
-      { beat: 2, semitone: 21, length: 0.9 },
-      { beat: 2.5, semitone: 19, length: 0.4 },
-      { beat: 3, semitone: 16, length: 0.9 },
-      { beat: 3.5, semitone: 12, length: 0.5 },
-    ];
-
-    for (let i = 0; i < 4; i += 1) {
-      this.musicNote(at + i * beat, root - 12, beat * 0.85, 'triangle', 0.5);
-    }
-    for (const note of melody) {
-      this.musicNote(
-        at + note.beat * beat,
-        root + note.semitone,
-        beat * note.length,
-        'square',
-        0.18,
-      );
-    }
-    void barLength;
-  }
-
-  private musicNote(
-    at: number,
-    semitone: number,
-    length: number,
-    shape: OscillatorType,
-    gain: number,
-  ): void {
-    const ctx = this.context;
-    const bus = this.musicBus;
-    if (!ctx || !bus) return;
-
-    const osc = ctx.createOscillator();
-    osc.type = shape;
-    osc.frequency.value = 220 * 2 ** (semitone / 12);
-
-    const envelope = ctx.createGain();
-    envelope.gain.setValueAtTime(0.0001, at);
-    envelope.gain.exponentialRampToValueAtTime(gain, at + 0.015);
-    envelope.gain.exponentialRampToValueAtTime(0.0001, at + length);
-
-    osc.connect(envelope);
-    envelope.connect(bus);
-    osc.start(at);
-    osc.stop(at + length + 0.02);
-    // Music voices are scheduled, bounded by the bar, and deliberately do NOT
-    // count against the one-shot ceiling - a busy moment must never be able to
-    // punch a hole in the tune.
-    osc.onended = () => {
-      osc.disconnect();
-      envelope.disconnect();
-    };
   }
 
   // --------------------------------------------------------- the one-shots

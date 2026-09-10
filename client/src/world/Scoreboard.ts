@@ -13,8 +13,11 @@ import {
 } from 'three';
 import type { LeaderboardSnapshot, NetLeaderEntry } from '../net/netTypes.js';
 import { PALETTE } from '../config/worldVisuals.js';
+import { logger } from '../util/logger.js';
 import { CanvasSign } from './CanvasSign.js';
 import { texturedBox } from './texturedBox.js';
+
+const SCOPE = 'Scoreboard';
 
 /** Which board is which, in the order they stand on the wall. */
 type Category = 'wins' | 'speed' | 'rebirths';
@@ -111,6 +114,9 @@ export class Scoreboard {
   private readonly signs: CanvasSign[] = [];
   private readonly geometries: BufferGeometry[] = [];
   private readonly materials: (MeshBasicMaterial | MeshLambertMaterial)[] = [];
+
+  /** So the "no leaderboard" complaint is made once, not sixty times a second. */
+  private warnedMissing = false;
 
   constructor() {
     // Hard against the back wall, facing down the arena at the spawn point.
@@ -217,7 +223,32 @@ export class Scoreboard {
    * together.
    */
   update(board: LeaderboardSnapshot | null): void {
-    if (!board) return;
+    if (!board) {
+      /*
+       * The server sent no leaderboard at all.
+       *
+       * Not "no scores" - no FIELD. The only way that happens is a server
+       * whose `CourseState` has no `leaderboard` on it, which means the
+       * deployed server is older than the deployed client. Everything else
+       * about the session works, because every other field predates this one,
+       * so the symptom is three blank boards and no other clue at all.
+       *
+       * Said ONCE, and loudly enough to find. Silence here cost a deployment.
+       */
+      if (!this.warnedMissing) {
+        this.warnedMissing = true;
+        logger.warn(
+          SCOPE,
+          'the server sent no leaderboard: its state has no such field, which ' +
+            'means it is running an older build than this client. Redeploy the ' +
+            'Colyseus server.',
+        );
+        for (const panel of this.panels) panel.showUnavailable();
+      }
+      return;
+    }
+
+    this.warnedMissing = false;
     for (const panel of this.panels) panel.apply(board[panel.category]);
   }
 
@@ -276,6 +307,9 @@ class PanelSurface {
   /** What was last drawn, so an unchanged board is not redrawn. */
   private signature = '';
 
+  /** The line shown instead of rows when nothing is ranked yet. */
+  private placeholder = 'No scores yet';
+
   constructor(spec: BoardSpec, width: number, height: number) {
     this.spec = spec;
     this.category = spec.category;
@@ -299,9 +333,23 @@ class PanelSurface {
 
   apply(rows: readonly NetLeaderEntry[]): void {
     const signature = rows.map((row) => `${row.handle}:${row.value}`).join('|');
-    if (signature === this.signature) return;
+    if (signature === this.signature && this.placeholder === 'No scores yet') return;
     this.signature = signature;
+    this.placeholder = 'No scores yet';
     this.draw(rows);
+    this.texture.needsUpdate = true;
+  }
+
+  /**
+   * Draw the board as UNAVAILABLE rather than merely empty.
+   *
+   * Used only when the server has no leaderboard field to send - a state the
+   * player cannot fix and the operator has to know about.
+   */
+  showUnavailable(): void {
+    this.placeholder = 'Scores unavailable';
+    this.signature = '\u0000unavailable';
+    this.draw([]);
     this.texture.needsUpdate = true;
   }
 
@@ -347,6 +395,25 @@ class PanelSurface {
     const handleX = pad + width * 0.13;
     const valueRight = width - pad;
     const handleRoom = valueRight - handleX - width * 0.2;
+
+    /*
+     * An empty board has to LOOK empty on purpose.
+     *
+     * A fresh server has no profiles and every live figure starts at zero, so
+     * nothing is ranked and every row is blank - which is pixel-identical to
+     * the board being broken. One line of text is the difference between "no
+     * one has scored yet" and "this feature is dead", and on a newly deployed
+     * server the first is what is actually true.
+     */
+    if (!rows.some((row) => row && row.handle)) {
+      ctx.textAlign = 'center';
+      ctx.fillStyle = PALETTE.boardHeading;
+      fitText(ctx, this.placeholder, width - pad * 2, rowH * 0.62);
+      ctx.globalAlpha = 0.75;
+      ctx.fillText(this.placeholder, width / 2, rowTop + rowH * 1.6);
+      ctx.globalAlpha = 1;
+      return;
+    }
 
     for (let i = 0; i < LEADERBOARD_SIZE; i += 1) {
       const row = rows[i];

@@ -53,6 +53,19 @@ export class Mount {
   private readonly riderVisual = new Group();
   private readonly riderModel: Object3D;
 
+  /**
+   * The rider's own nodes, for the Bloxity cosmetics layer.
+   *
+   * Read-only handles rather than a `dressWith(...)` method: this class owns
+   * the mount, not the player's account, and a cosmetics system that had to be
+   * taught about here would be one more thing to keep in step. The avatar
+   * module hangs items off the BONES inside the model and scales the visual
+   * group; nothing it does changes what this class believes.
+   */
+  get rider(): { visual: Group; model: Object3D } {
+    return { visual: this.riderVisual, model: this.riderModel };
+  }
+
   /** Slot currently built, so a re-equip only rebuilds when it must. */
   private slot: number;
 

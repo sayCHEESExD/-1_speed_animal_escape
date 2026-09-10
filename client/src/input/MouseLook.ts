@@ -347,9 +347,6 @@ export class MouseLook {
     const hide =
       this.armed && this.lockEverGranted && !this.suppressed && !this.cursorFree;
     document.body.classList.toggle('aoe-cursor-hidden', hide);
-    // Drives the on-screen hint, so the player is told how to get back into
-    // the game by the same state that decided to let them out of it.
-    document.body.classList.toggle('aoe-cursor-free', this.isCursorFree);
   }
 
   /**

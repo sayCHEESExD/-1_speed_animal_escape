@@ -126,6 +126,33 @@ export const injectHudStyles = (): void => {
   white-space: nowrap;
   pointer-events: none;
 }
+/* The PC key cap, top-left, as in the reference art.
+ *
+ * Top LEFT because the red "!" badge already owns the bottom right and the
+ * label owns the bottom edge - the corner is the only place it can sit without
+ * covering something that was there first.
+ */
+.aoe-tile__key {
+  position: absolute;
+  left: -7px;
+  top: -7px;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 4px;
+  box-sizing: border-box;
+  border: 3px solid var(--aoe-ink);
+  border-radius: 7px;
+  background: #ffffff;
+  color: var(--aoe-ink);
+  font-size: 13px;
+  line-height: 16px;
+  text-align: center;
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.28);
+  pointer-events: none;
+}
+/* Touch has no keyboard, so the mobile layout keeps exactly what it had. */
+body.aoe-touch-mode .aoe-tile__key { display: none; }
+
 /* The red "!" badge: something is available. */
 .aoe-tile__badge {
   position: absolute;
@@ -308,34 +335,163 @@ export const injectHudStyles = (): void => {
   .aoe-rb__fill { transition: none; }
 }
 
-/* ---- The desktop hint ---------------------------------------------------
- * Pointer lock hides the cursor, so a mouse-and-keyboard player has no way to
- * discover that the rail is clickable at all. This says so, and swaps to the
- * way back the instant the cursor is handed over - both halves driven by the
- * one class MouseLook sets, so the hint cannot contradict the input state.
+/* ---- The Bloxity account chip -------------------------------------------
+ * Top RIGHT: the Wins counter owns the top centre and the rail owns the left,
+ * and this is the only corner left that a player is not already reading.
  */
-.aoe-hint {
+.aoe-account {
   position: fixed;
-  /* Bottom RIGHT, not bottom centre: the Speed figure and the level bar own
-   * the middle of the screen, and a hint printed across them is worse than no
-   * hint at all. */
-  right: 16px;
-  bottom: 18px;
-  transform: none;
-  z-index: 21;
-  pointer-events: none;
-  font-size: clamp(11px, 1.1vw, 14px);
-  letter-spacing: 0.02em;
+  top: 12px;
+  right: 12px;
+  z-index: 23;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+.aoe-account__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px 4px 4px;
+  border: 3px solid var(--aoe-ink);
+  border-radius: 999px;
+  background: rgba(18, 24, 38, 0.82);
+}
+.aoe-account__pfp {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 2px solid var(--aoe-ink);
+  object-fit: cover;
+}
+.aoe-account__name {
+  font-size: clamp(12px, 1.2vw, 15px);
   color: #ffffff;
-  opacity: 0.72;
+  max-width: 22vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.aoe-account__note {
+  font-size: clamp(10px, 1vw, 13px);
+  color: #ffffff;
+  opacity: 0.6;
+}
+.aoe-account__actions {
+  display: flex;
+  gap: 6px;
+}
+.aoe-account__btn,
+.aoe-account__login {
+  cursor: pointer;
+  border: 3px solid var(--aoe-ink);
+  border-radius: 10px;
+  padding: 5px 10px;
+  font-size: clamp(11px, 1.1vw, 14px);
+  color: #ffffff;
+  background: linear-gradient(180deg, #6de6ff 0%, #2aa8f5 55%, #1670d0 100%);
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.3);
+}
+.aoe-account__login {
+  background: linear-gradient(180deg, #ffd76b 0%, #ffa32b 55%, #d97708 100%);
+  padding: 7px 14px;
+}
+.aoe-account__btn:hover,
+.aoe-account__login:hover { filter: brightness(1.1); }
+/* Touch keeps the chip but drops the row of buttons to a single tap target's
+ * worth of width, so it never crowds the jump button. */
+body.aoe-touch-mode .aoe-account__name { max-width: 30vw; }
+
+/* ---- Friends and Bux rows ----------------------------------------------- */
+.aoe-friend {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 4px;
+  border-bottom: 2px solid rgba(43, 60, 88, 0.16);
+}
+.aoe-friend:last-of-type { border-bottom: none; }
+.aoe-friend__pfp {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 2px solid var(--aoe-ink);
+  object-fit: cover;
+  flex: none;
+}
+.aoe-friend__name {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.aoe-friend__name b,
+.aoe-friend__name small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.aoe-friend__name small { opacity: 0.6; }
+.aoe-friend__status {
+  font-size: 12px;
+  opacity: 0.75;
+  flex: none;
+}
+.aoe-friend__invite,
+.aoe-bux__buy {
+  cursor: pointer;
+  flex: none;
+  border: 3px solid var(--aoe-ink);
+  border-radius: 9px;
+  padding: 5px 11px;
+  color: #ffffff;
+  font: inherit;
+  font-size: 13px;
+  background: linear-gradient(180deg, #9bf06a 0%, #4fce2e 60%, #37a81f 100%);
+}
+.aoe-friend__invite:disabled,
+.aoe-bux__buy:disabled { filter: saturate(0.3) brightness(0.85); cursor: default; }
+
+.aoe-bux {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 4px;
+  border-bottom: 2px solid rgba(43, 60, 88, 0.16);
+}
+.aoe-bux:last-of-type { border-bottom: none; }
+.aoe-bux__text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+  flex: 1 1 auto;
+}
+.aoe-bux__text small { opacity: 0.65; }
+.aoe-bux__buy {
+  background: linear-gradient(180deg, #ffd76b 0%, #ffa32b 55%, #d97708 100%);
+}
+
+.aoe-panel--friends .aoe-panel__head,
+.aoe-panel--bux .aoe-panel__head {
+  background: linear-gradient(160deg, #6de6ff 0%, #2aa8f5 55%, #1670d0 100%);
+}
+
+/* ---- The FPS readout, from the portal's show_fps setting ----------------- */
+.aoe-fps {
+  position: fixed;
+  left: 12px;
+  top: 12px;
+  z-index: 23;
+  font-size: 13px;
+  color: #9bf06a;
   text-shadow:
     2px 0 0 var(--aoe-ink), -2px 0 0 var(--aoe-ink),
     0 2px 0 var(--aoe-ink), 0 -2px 0 var(--aoe-ink);
-  white-space: nowrap;
+  pointer-events: none;
 }
-.aoe-hint__free { display: none; }
-body.aoe-cursor-free .aoe-hint__locked { display: none; }
-body.aoe-cursor-free .aoe-hint__free { display: inline; }
+.aoe-fps[hidden] { display: none; }
 
 /* ---- Panels ------------------------------------------------------------- */
 .aoe-panel {

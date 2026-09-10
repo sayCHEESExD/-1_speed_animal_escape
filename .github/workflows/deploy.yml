@@ -1,0 +1,242 @@
+# Deploy to Bloxity Hosting.
+#
+#   dev            -> Bloxity "dev" channel
+#   main / master  -> Bloxity "prod" channel
+#
+# Two halves, because the game is two things: a Colyseus server that runs as a
+# long-lived container, and a static Vite build. The server image goes to GHCR
+# and is deployed through the Legion API; the client is built and uploaded to
+# Bloxity Hosting.
+#
+# The client build is deliberately NOT gated on the server deploy. A static
+# bundle that failed to upload leaves players on the previous one, which is a
+# far better outcome than a half-deployed pair.
+name: Deploy to Bloxity
+
+on:
+  push:
+    branches: [dev, main, master]
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Channel to deploy to
+        required: true
+        default: dev
+        type: choice
+        options: [dev, prod]
+
+concurrency:
+  # One deploy per branch at a time. Two overlapping runs would race to publish
+  # the same channel and the winner would be whichever finished last, not
+  # whichever was newer.
+  group: bloxity-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BLOXITY_GAME_ID: animal-obby-escape
+  # The repository is named `-1_speed_animal_escape`, and a Docker reference
+  # may not begin with a dash - so the image is named explicitly rather than
+  # derived from the repo.
+  IMAGE_NAME: ghcr.io/saycheesexd/animal-obby-escape-server
+  SEAT_CAP: '15'
+
+  # ---------------------------------------------------------------------
+  # The Legion control-plane endpoints.
+  #
+  # These are the ONE part of this workflow that could not be verified: the
+  # public Bloxity docs cover the browser SDK only and publish no hosting or
+  # deployment API. They are set as repository VARIABLES rather than hard-coded
+  # so correcting them is a settings change, not a commit - see the deploy
+  # steps below, which print the request and the response on failure.
+  # ---------------------------------------------------------------------
+  LEGION_API: ${{ vars.LEGION_API_BASE || 'https://api.bloxity.io' }}
+  LEGION_DEPLOY_PATH: ${{ vars.LEGION_DEPLOY_PATH || '/v1/hosting/games/{gameId}/server' }}
+  LEGION_UPLOAD_PATH: ${{ vars.LEGION_UPLOAD_PATH || '/v1/hosting/games/{gameId}/client' }}
+
+jobs:
+  # Which channel this run publishes to, decided once so both jobs agree.
+  channel:
+    runs-on: ubuntu-latest
+    outputs:
+      name: ${{ steps.pick.outputs.name }}
+    steps:
+      - id: pick
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            CHANNEL="${{ inputs.channel }}"
+          elif [ "${{ github.ref_name }}" = "dev" ]; then
+            CHANNEL="dev"
+          else
+            CHANNEL="prod"
+          fi
+          echo "name=$CHANNEL" >> "$GITHUB_OUTPUT"
+          echo "Deploying branch '${{ github.ref_name }}' to the '$CHANNEL' channel."
+
+  # ------------------------------------------------------------------ server
+  server:
+    needs: channel
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Required to push to ghcr.io with the built-in GITHUB_TOKEN.
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push the server image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          # The repository root: the Dockerfile installs the whole npm
+          # workspace because the server imports `@animal/shared`.
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ needs.channel.outputs.name }}
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          # A layer cache in the registry, so an unchanged lockfile does not
+          # re-run `npm ci` on every push.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Deploy the server to Bloxity
+        env:
+          TOKEN: ${{ secrets.LEGION_DEPLOY_TOKEN }}
+          CHANNEL: ${{ needs.channel.outputs.name }}
+          IMAGE: ${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TOKEN:-}" ]; then
+            echo "::error::LEGION_DEPLOY_TOKEN is not set. Add it under Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+
+          URL="${LEGION_API}${LEGION_DEPLOY_PATH//\{gameId\}/$BLOXITY_GAME_ID}"
+
+          # Deployed BY DIGEST, not by tag. A tag is a moving pointer and the
+          # channel tag was just overwritten; the digest names the exact image
+          # this run built, so a rollback or a re-run cannot deploy something
+          # a later push replaced.
+          PAYLOAD=$(jq -n \
+            --arg gameId "$BLOXITY_GAME_ID" \
+            --arg channel "$CHANNEL" \
+            --arg image "$IMAGE" \
+            --arg commit "${GITHUB_SHA}" \
+            --argjson seatCap "${SEAT_CAP}" \
+            '{gameId: $gameId, channel: $channel, image: $image, seatCap: $seatCap, commit: $commit}')
+
+          echo "POST $URL"
+          echo "$PAYLOAD" | jq .
+
+          HTTP=$(curl -sS -o /tmp/deploy.out -w '%{http_code}' \
+            -X POST "$URL" \
+            -H "Authorization: Bearer ${TOKEN}" \
+            -H 'Content-Type: application/json' \
+            --data "$PAYLOAD") || true
+
+          echo "--- response ($HTTP) ---"
+          cat /tmp/deploy.out || true
+          echo
+
+          if [ "$HTTP" = "404" ]; then
+            echo "::error::The deploy endpoint returned 404. The path is a repository variable - set LEGION_DEPLOY_PATH to the route Bloxity documents for your account."
+            exit 1
+          fi
+          case "$HTTP" in
+            2*) echo "Server deployed to the '$CHANNEL' channel with seatCap ${SEAT_CAP}." ;;
+            *)  echo "::error::Server deploy failed with HTTP $HTTP."; exit 1 ;;
+          esac
+
+  # ------------------------------------------------------------------ client
+  client:
+    needs: channel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Matches the engines field and the Netlify build.
+          node-version: '20'
+          cache: npm
+
+      - run: npm ci
+
+      # The repo's own gates, run before anything is published rather than
+      # after: a build that typechecks but fails `verify` is a broken course,
+      # and finding that out from players is finding out too late.
+      - name: Typecheck and verify
+        run: |
+          npm run typecheck
+          npm run verify
+
+      - name: Build the client
+        env:
+          # Baked in at build time - Vite has no later step in which to inject
+          # them, so a change here means a rebuild.
+          VITE_BLOXITY_GAME_ID: ${{ env.BLOXITY_GAME_ID }}
+          # The Colyseus endpoint for this channel. Per-channel because dev and
+          # prod are different servers; without it the deployed client boots,
+          # plays offline, and says so.
+          VITE_SERVER_URL: ${{ needs.channel.outputs.name == 'prod' && vars.SERVER_URL_PROD || vars.SERVER_URL_DEV }}
+        run: |
+          npm run build:client
+          echo "VITE_BLOXITY_GAME_ID=$VITE_BLOXITY_GAME_ID"
+          if [ -z "${VITE_SERVER_URL:-}" ]; then
+            echo "::warning::VITE_SERVER_URL is empty for this channel. The client will boot and play offline. Set SERVER_URL_DEV / SERVER_URL_PROD as repository variables."
+          fi
+
+      - name: Check the build against the 12 MB budget
+        run: npm run size:client
+
+      - name: Package the client
+        run: |
+          set -euo pipefail
+          test -f client/dist/index.html || { echo "::error::client/dist/index.html is missing - the build produced nothing."; exit 1; }
+          tar -czf client-dist.tar.gz -C client/dist .
+          ls -la client-dist.tar.gz
+
+      - name: Upload the client to Bloxity Hosting
+        env:
+          TOKEN: ${{ secrets.LEGION_DEPLOY_TOKEN }}
+          CHANNEL: ${{ needs.channel.outputs.name }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TOKEN:-}" ]; then
+            echo "::error::LEGION_DEPLOY_TOKEN is not set. Add it under Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+
+          URL="${LEGION_API}${LEGION_UPLOAD_PATH//\{gameId\}/$BLOXITY_GAME_ID}"
+          echo "POST $URL  (channel=$CHANNEL)"
+
+          HTTP=$(curl -sS -o /tmp/upload.out -w '%{http_code}' \
+            -X POST "$URL" \
+            -H "Authorization: Bearer ${TOKEN}" \
+            -F "channel=${CHANNEL}" \
+            -F "gameId=${BLOXITY_GAME_ID}" \
+            -F "commit=${GITHUB_SHA}" \
+            -F "bundle=@client-dist.tar.gz;type=application/gzip") || true
+
+          echo "--- response ($HTTP) ---"
+          cat /tmp/upload.out || true
+          echo
+
+          if [ "$HTTP" = "404" ]; then
+            echo "::error::The upload endpoint returned 404. The path is a repository variable - set LEGION_UPLOAD_PATH to the route Bloxity documents for your account."
+            exit 1
+          fi
+          case "$HTTP" in
+            2*) echo "Client uploaded to the '$CHANNEL' channel." ;;
+            *)  echo "::error::Client upload failed with HTTP $HTTP."; exit 1 ;;
+          esac

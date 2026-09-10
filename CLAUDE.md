@@ -225,12 +225,18 @@ engine. Do not add a framework or a build tool without a concrete need.
   Every animal's `riderOffset.y` is `belly + bodyHeight + 0.2 - 1.21`. Setting
   it to the saddle height instead buries the rider's legs inside the barrel.
 - **Not one image file is used for the WORLD.** Every world texture - the
-  studded ground, the brick walls, the planks, the gold pads, the chevrons and
-  the sky - is drawn on a canvas at runtime by `WorldTextures`. Do not add an
-  image for something `WorldTextures` could draw.
+  studded ground, the brick walls, the planks, the gold pads, the treadmill
+  belts and the sky - is drawn on a canvas at runtime by `WorldTextures`. Do
+  not add an image for something `WorldTextures` could draw.
+- **Every static file lives in the repo-level `assets/`**, which Vite publishes
+  as the web ROOT (`publicDir` points at it). So `assets/ui/run.png` is served
+  at `/ui/run.png` and `assets/audio/background_music.mp3` at
+  `/audio/background_music.mp3`. There is no `client/public/` - `publicDir` can
+  only be one directory, and this is it. A file put under `client/src/` would
+  be hashed into the bundle instead of served.
 - The only images in the build are the supplied rider FBX and its texture, and
-  the four HUD icons in `client/public/ui/` (`trophy`, `rebirth`, `trail`,
-  `run`). Those are SUPPLIED ART and are used as they are: never regenerate one
+  the four HUD icons in `assets/ui/` (`trophy`, `rebirth`, `trail`, `run`).
+  Those are SUPPLIED ART and are used as they are: never regenerate one
   procedurally, and never set both dimensions in CSS - drive one and leave the
   other automatic so the real aspect ratio survives. `run.png` is 563 x 585.
 
@@ -466,10 +472,20 @@ was deliberately left empty for. It stays the only thing there.
 
 ## Audio
 
-Synthesised, in `client/src/audio/`. There is not one audio file in the build,
-for the same reason there is not one image file: a music track is the single
-easiest way to spend the whole 12 MB budget, and oscillators cost bytes
-measured in hundreds.
+In `client/src/audio/`. Every SOUND EFFECT is synthesised - oscillators cost
+bytes measured in hundreds, and a pack of wavs is the easiest way to spend the
+12 MB budget.
+
+The BACKGROUND MUSIC is the one deliberate exception: a supplied track at
+`assets/audio/background_music.mp3`, because a tune is the one thing an
+oscillator cannot fake convincingly. It is STREAMED through an `<audio>`
+element rather than decoded into a buffer - `decodeAudioData` would hold a
+three-minute stereo file as tens of megabytes of uncompressed samples for
+something only ever played end to end - and routed through `musicBus`, which is
+what keeps the portal's `music_volume`, the master volume and mute all working
+on it untouched. Muting PAUSES the element rather than merely silencing it: a
+muted stream still decodes, and on a phone that is battery spent on nothing.
+Check `npm run size:client` after changing the track.
 
 - **ONE context, ONE music voice.** The loop is scheduled ahead into Web Audio's
   own clock on a lookahead timer, and `resume()` is idempotent - there is no
@@ -515,6 +531,60 @@ measured in hundreds.
   or a direct `joinById` does not go through it.
 - Profiles are a JSON file. On an ephemeral filesystem a redeploy wipes every
   player's progression unless `ANIMAL_DATA_DIR` points at a mounted volume.
+
+## Bloxity
+
+The cross-game portal: login, avatars, friends, synced settings and the Bux
+currency. It exposes itself as `window.Legion.SDK` and is loaded from a CDN
+script in `index.html`, BEFORE the module bundle.
+
+- **`client/src/bloxity/Bloxity.ts` is the only file in the game that touches
+  `window.Legion`.** The renderer, the audio and the input layer are handed
+  plain values through `BloxityHost` and never learn a portal exists - which is
+  what makes the integration removable and what keeps the game working when the
+  script is blocked.
+- **Every call is guarded.** The SDK is a third-party script: it can be
+  offline, blocked, or an older build without a namespace. A missing SDK
+  degrades to "no portal", never to a broken game. `BloxityPanel` says
+  "Playing offline" rather than offering a login that cannot work.
+- **ONE `onUserChanged`**, owned by `Bloxity`, fanned out to everything else
+  through `Bloxity.onUserChanged`. It fires immediately with the current state,
+  exactly as the SDK's own does, so a subscriber cannot tell the difference.
+- **The user object is never cached.** `getUser()` is asked each time, so a
+  login in another tab cannot leave a stale name on screen.
+- Registering a settings listener is what makes the control APPEAR in the
+  portal menu, so `SETTING_KEYS` is a promise: every key there is wired to
+  something real, and the two that this game has nothing to apply
+  (`enable_chat`, `background_transparency`) are declared because the portal
+  draws those itself.
+- **Bux are server-authoritative, like every other reward.** The client passes
+  a SKU and NEVER a price - the price lives in the portal's catalogue, keyed by
+  the game slug. Nothing is granted locally: Bloxity calls the webhook, the
+  room credits the profile through `wallet.add`, and the client sees it arrive
+  as replicated state.
+- The webhook is `POST /bloxity/bux`, verified against
+  `BLOXITY_WEBHOOK_SECRET` when one is set. **Answering 2xx is the contract** -
+  Bloxity refunds anything that fails - so an unrecognised SKU still returns
+  200 and is logged, because a catalogue that moved ahead of a deploy must not
+  cost a player their purchase. Transaction ids are remembered, so a retry pays
+  out once.
+- Fulfilment QUEUES rather than writes. The webhook arrives on the HTTP thread
+  while the player may be live with their Wins in replicated state that the
+  next autosave writes over the profile - so `BuxGrants` records, and the room
+  applies what is waiting on join and on its tick.
+- A purchase is made by the ACCOUNT, not the browser. The client sends its
+  Bloxity id as a join option alongside the browser-stored `playerId`; they are
+  different identities and the grant is addressed to the account.
+- **Cosmetics are applied to the LOCAL rider only** - skin texture, hat, back
+  item and proportions. Remote riders keep the shared default material.
+- **The body-part slots are deliberately NOT worn.** Head, torso, arms and legs
+  are separate GLB meshes that would replace `player.fbx`, which is this
+  project's canonical player asset with the rig the whole animation system is
+  bound to. Swapping it at runtime is a second player asset by another name.
+  The ids are read and logged so the data is visibly arriving.
+- Proportions are written as SCALE and POSITION on bones, never rotation:
+  `PlayerRig` rebuilds every bone's quaternion from its rest pose every frame,
+  so a rotation written there would be gone before it was drawn.
 
 ## Verification
 
@@ -595,7 +665,12 @@ harness has to re-assert them each frame.
 
 ## Current milestone
 
-Milestone 4 is complete: checkpoints are gone and every death returns to the
+Milestone 5 is complete: the Bloxity SDK is integrated - login, friends and
+invites, portal settings driving the real audio/renderer/input, cosmetics on
+the rider, the game lifecycle and room reported to the portal, and Bux
+purchases fulfilled server-side through a webhook.
+
+Milestone 4 was: checkpoints are gone and every death returns to the
 one spawn, the prestige ladder is called Rebirth throughout, the obby runs to
 TWENTY authored stages on a data-driven difficulty ladder, there is a
 synthesised audio system, every menu is reachable with a mouse, and three

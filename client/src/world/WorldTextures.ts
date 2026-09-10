@@ -128,35 +128,6 @@ export class WorldTextures {
     });
   }
 
-  /**
-   * The chevron strip that says "this way".
-   *
-   * White arrowheads on green, exactly as in the reference art. One texture
-   * tiled along the strip, so a hundred arrows cost one upload.
-   */
-  chevrons(background: string, arrow: string): Texture {
-    return this.cached(`chevrons:${background}:${arrow}`, () => {
-      const size = 128;
-      const ctx = context(size);
-      ctx.fillStyle = background;
-      ctx.fillRect(0, 0, size, size);
-
-      ctx.fillStyle = arrow;
-      // Two arrowheads per tile, pointing along +V, which the strip's UVs run
-      // down the course.
-      for (let i = 0; i < 2; i += 1) {
-        const base = i * (size / 2);
-        ctx.beginPath();
-        ctx.moveTo(size * 0.5, base + size * 0.06);
-        ctx.lineTo(size * 0.9, base + size * 0.4);
-        ctx.lineTo(size * 0.1, base + size * 0.4);
-        ctx.closePath();
-        ctx.fill();
-      }
-      return ctx.canvas;
-    });
-  }
-
   /** Quicksand: coarse speckled sand, for the bottom of the sinking stages. */
   sand(color: string, dark: string): Texture {
     return this.cached(`sand:${color}:${dark}`, () => {

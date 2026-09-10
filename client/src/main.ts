@@ -25,11 +25,16 @@ const main = async (): Promise<void> => {
   if (!container) throw new Error('#app container missing from index.html');
 
   const game = new Game(container);
+  // Before anything loads: the portal draws the loading screen these steps
+  // fill in, so it has to be listening before there is anything to report.
+  game.startBloxity();
 
   setBootStatus('Loading rider…');
+  game.loadingStep('Loading rider…');
   await game.initialise();
 
   setBootStatus('Connecting to server…');
+  game.loadingStep('Connecting to server…');
   let online = true;
   try {
     await game.connect();
