@@ -218,25 +218,52 @@ browser will not open an insecure socket from a secure page.
 
 The server is built from the repo-root `Dockerfile` - the build context has to
 be the root, because the server imports `@animal/shared` as a workspace
-dependency - pushed to `ghcr.io/saycheesexd/animal-obby-escape-server`, and
-deployed by DIGEST rather than by tag, so a re-run cannot ship an image a later
-push replaced. The client is built with `VITE_BLOXITY_GAME_ID`, gated on
-`typecheck`, `verify` and the 12 MB budget, then uploaded.
+dependency - pushed to `ghcr.io/saycheesexd/animal-obby-escape-server` under an
+immutable `<channel>-<sha>` tag, and rolled by that tag rather than by the
+moving `<channel>` one, so a re-run cannot ship an image a later push replaced.
+The client is built with `VITE_BLOXITY_GAME_ID`, gated on `typecheck`, `verify`
+and the 12 MB budget, zipped, and uploaded.
+
+Two different hosts, which is not a typo:
+
+| Call            | Route                                                                    |
+| --------------- | ------------------------------------------------------------------------ |
+| Roll the server | `POST https://legion.bloxity.io/v1/apps/{gameId}/deploy`                  |
+| Publish the client | `POST https://api.bloxity.io/v1/hosting/games/{gameId}/frontend?channel=&version=` |
+
+Both come from <https://hosting.bloxity.io/docs>. `seatCap` must equal
+`MAX_PLAYERS_PER_ROOM` (15): Legion fills a pod to `seatCap` and then spawns
+the next one, so a larger figure would route a sixteenth player to a room that
+refuses them. `maxReplicas` 5 puts total capacity at 75.
+
+The addresses the game answers on:
+
+| Channel | Backend                                          | Frontend                                         |
+| ------- | ------------------------------------------------ | ------------------------------------------------ |
+| `dev`   | `https://animal-obby-escape.dev.host.bloxity.io` | `https://animal-obby-escape.dev.play.bloxity.io` |
+| `prod`  | `https://animal-obby-escape.host.bloxity.io`     | `https://animal-obby-escape.play.bloxity.io`     |
 
 Set these in the repository (Settings -> Secrets and variables -> Actions):
 
-| Name                  | Kind     | Purpose                                  |
-| --------------------- | -------- | ---------------------------------------- |
-| `LEGION_DEPLOY_TOKEN` | secret   | Authenticates both deploy calls.          |
-| `SERVER_URL_DEV`      | variable | `wss://…` for the dev channel's client.   |
-| `SERVER_URL_PROD`     | variable | `wss://…` for the prod channel's client.  |
-| `LEGION_DEPLOY_PATH`  | variable | Override if the server deploy route differs. |
-| `LEGION_UPLOAD_PATH`  | variable | Override if the client upload route differs. |
+| Name                  | Kind     | Purpose                                     |
+| --------------------- | -------- | ------------------------------------------- |
+| `LEGION_DEPLOY_TOKEN` | secret   | Authenticates both calls. **Required.**     |
+| `SERVER_URL_DEV`      | variable | Optional. Overrides the dev backend URL.    |
+| `SERVER_URL_PROD`     | variable | Optional. Overrides the prod backend URL.   |
+| `LEGION_API_BASE`     | variable | Optional. Overrides `legion.bloxity.io`.    |
+| `HOSTING_API_BASE`    | variable | Optional. Overrides `api.bloxity.io`.       |
 
-The two path variables exist because Bloxity's public docs cover the browser
-SDK only and publish no hosting API: the defaults in the workflow are a
-best guess, and the deploy steps print the request and the response so the
-first run says exactly what to correct.
+Only the token has to be set - the two backend URLs default to this game's own
+Bloxity hosts. One thing is NOT in the repository: after the first run, make the
+GHCR package public (repo -> Packages -> Package settings -> Change visibility),
+or Legion cannot pull the image.
+
+> [!WARNING]
+> Legion pods are ephemeral and the game scales to zero when idle, so the
+> `ANIMAL_DATA_DIR` JSON file does NOT survive there - `VOLUME` in a Dockerfile
+> asks Kubernetes for nothing. Legion injects `MONGODB_URI` for exactly this,
+> and until a `PersistenceAdapter` reads it, progression on Bloxity resets
+> whenever the last player leaves. See "Persistence" above.
 
 ### 3. Check it
 

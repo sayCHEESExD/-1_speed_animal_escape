@@ -57,8 +57,16 @@ COPY --from=build /app/server/package.json ./server/package.json
 COPY --from=build /app/server/dist ./server/dist
 
 # Profiles are a JSON file, and a container filesystem does not survive a
-# redeploy. Mount a volume here in production or every player's progression is
-# lost on each release - see `ANIMAL_DATA_DIR` in the README.
+# redeploy. Mount a volume here and every player's progression survives a
+# release - see `ANIMAL_DATA_DIR` in the README.
+#
+# ON BLOXITY LEGION THIS IS NOT ENOUGH, and the declaration below is honest
+# about what it can promise: `VOLUME` asks the Docker CLI for an anonymous
+# volume and asks Kubernetes for NOTHING. Legion runs pods that scale to zero
+# when the last player leaves, so /data goes with them. Legion injects
+# `MONGODB_URI` - an isolated database per game+channel - for exactly this
+# case, and until a `PersistenceAdapter` reads it, progression there lasts only
+# as long as a pod does.
 ENV ANIMAL_DATA_DIR=/data
 VOLUME ["/data"]
 
