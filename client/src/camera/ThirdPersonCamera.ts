@@ -53,6 +53,17 @@ export class ThirdPersonCamera {
   /** Extra distance still to be given up by the respawn dolly. */
   private zoomOffset = 0;
 
+  /**
+   * The player's wheel zoom: what they asked for, and where it has eased to.
+   *
+   * Distinct from `zoomOffset` above, which is the respawn dolly and decays to
+   * nothing. This one is a PREFERENCE and persists - across deaths, rebirths
+   * and stages - because a player who chose their framing has not asked to
+   * choose it again every time they respawn.
+   */
+  private zoomTarget = 0;
+  private zoomEased = 0;
+
   /** Eased 0..1 speed factor driving the dynamic distance and FOV. */
   private rush = 0;
 
@@ -105,6 +116,17 @@ export class ThirdPersonCamera {
   }
 
   /**
+   * Push the camera out or pull it in, as an offset on the resting distance.
+   *
+   * Takes the input layer's ALREADY-CLAMPED accumulator, so the limits live in
+   * one place. Called every frame like `setOrbit`; the easing below is what
+   * turns a discrete wheel notch into a glide.
+   */
+  setZoom(offset: number): void {
+    this.zoomTarget = offset;
+  }
+
+  /**
    * @param speed the mount's horizontal speed, for the dynamic framing.
    */
   update(delta: number, speed: number): void {
@@ -132,7 +154,17 @@ export class ThirdPersonCamera {
     const targetRush = clamp(speed / CAMERA.speedReference, 0, 1);
     this.rush += (targetRush - this.rush) * (1 - Math.exp(-CAMERA.speedEase * delta));
 
-    const distance = CAMERA.distance + this.zoomOffset + CAMERA.speedDistance * this.rush;
+    // The player's zoom eases the same frame-rate independent way the follow
+    // point does, so a notch glides rather than snapping.
+    this.zoomEased +=
+      (this.zoomTarget - this.zoomEased) * (1 - Math.exp(-CAMERA.zoomEase * delta));
+
+    // Never let the sum reach the mount: the limits already guarantee it, and
+    // this is what keeps that true if the framing is ever retuned.
+    const distance = Math.max(
+      1,
+      CAMERA.distance + this.zoomEased + this.zoomOffset + CAMERA.speedDistance * this.rush,
+    );
     const fov = CAMERA.fov + CAMERA.speedFov * this.rush;
     if (Math.abs(this.camera.fov - fov) > 0.01) {
       this.camera.fov = fov;

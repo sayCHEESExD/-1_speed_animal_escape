@@ -10,8 +10,27 @@ import {
   MeshBasicMaterial,
 } from 'three';
 
-/** How many segments the ribbon remembers. */
-const SEGMENTS = 26;
+/**
+ * How many segments the ribbon remembers.
+ *
+ * Raised from 26 (+19%) because the tail was hard to pick out behind the mount
+ * at low speed.
+ *
+ * This is the PROPORTIONAL knob, and that is why it was the one moved. The
+ * ribbon's length is `SEGMENTS` times the gap between emitted points, whatever
+ * that gap turns out to be, so a change here scales the ribbon by the same
+ * percentage at every speed and on every machine - it cannot help a walk at the
+ * cost of turning a gallop into a banner.
+ *
+ * SEGMENTS rather than STEP also leaves the LOOK alone: the fade and the taper
+ * are normalised over the live point count (`t = i / (count - 1)`), so more
+ * points lengthen the ribbon while its density and its dissolve stay exactly as
+ * authored. Stretching the same 26 points would read as a coarser band.
+ *
+ * Be aware of what the gap actually is before tuning it further - see the
+ * emission test in `update`, which does not currently gate on STEP.
+ */
+const SEGMENTS = 31;
 
 /** How far the mount must travel before a new segment is laid. */
 const STEP = 1.1;
@@ -97,6 +116,17 @@ export class TrailEffect {
 
     if (speed > 1.5) {
       const last = this.points[this.points.length - 1];
+      // NOTE: this test never fails, so a point is laid every FRAME and STEP is
+      // inert. `last.y` was stored as `y + EMIT_Y`, so the vertical term is a
+      // constant EMIT_Y (1.4) that already exceeds STEP (1.1) on its own,
+      // whatever the mount did. The ribbon's length is therefore one frame's
+      // travel times SEGMENTS - it grows with speed and SHRINKS with frame
+      // rate (at 40 u/s: 40 units at 30fps, 20 at 60, 8 at 144).
+      //
+      // Left as it behaves today rather than quietly corrected: comparing
+      // against `last.y - EMIT_Y` would make STEP bite and change the trail at
+      // every speed - roughly 33 units always - which is a look change, not the
+      // small lengthening this was asked for.
       const moved =
         !last || Math.hypot(x - last.x, y - last.y, z - last.z) >= STEP;
       if (moved) {

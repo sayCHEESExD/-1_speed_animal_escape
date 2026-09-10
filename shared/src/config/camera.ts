@@ -31,6 +31,29 @@ export interface CameraConfig {
   readonly speedReference: number;
   /** How fast the dynamic distance and FOV ease, per second. */
   readonly speedEase: number;
+
+  /**
+   * Closest the player may pull the camera, as an OFFSET on `distance`.
+   *
+   * An offset rather than an absolute distance, because the speed pull-back is
+   * an offset too: the player's zoom and the game's framing then add, and
+   * zooming in at speed still gives the shot the obby needs rather than
+   * fighting it.
+   */
+  readonly zoomMin: number;
+  /** Furthest the player may push the camera, as an offset on `distance`. */
+  readonly zoomMax: number;
+  /** World units of zoom per wheel notch. */
+  readonly zoomStep: number;
+  /**
+   * How fast the zoom eases toward what the wheel asked for, per second.
+   *
+   * A wheel arrives as discrete notches, and applying one to the distance
+   * directly is a jump. Easing turns each notch into a short glide, which is
+   * the difference between a zoom that feels like a control and one that feels
+   * like a stutter.
+   */
+  readonly zoomEase: number;
 }
 
 /**
@@ -50,4 +73,14 @@ export const CAMERA: CameraConfig = {
   speedFov: 12,
   speedReference: 140,
   speedEase: 2.2,
+
+  // 5.6 to 21.6 units behind the mount at rest. The near limit keeps the
+  // camera outside the animal - the mount is a body, not a point, and a
+  // distance that reaches inside it renders the player's own head from within.
+  // The far limit is roughly twice the authored framing, which is as far back
+  // as the corridor still reads as a corridor.
+  zoomMin: -4,
+  zoomMax: 12,
+  zoomStep: 1.1,
+  zoomEase: 12,
 };

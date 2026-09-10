@@ -444,6 +444,7 @@ export class Game {
     // The MOUSE aims the camera, and the camera defines forward. Nothing the
     // player presses rotates the view.
     this.camera.setOrbit(this.input.look.yaw, this.input.look.pitch);
+    this.camera.setZoom(this.input.look.zoom);
 
     // The world clock, advanced locally between patches. Sinking platforms and
     // rolling balls are pure functions of it on BOTH sides, so the client has

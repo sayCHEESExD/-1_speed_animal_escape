@@ -1,9 +1,21 @@
+import { CAMERA } from '@animal/shared';
+
 /** Radians of rotation per pixel of mouse movement. */
 const SENSITIVITY = 0.0026;
 
 /** Pitch limits, so the camera can never flip over the player. */
 const MIN_PITCH = -0.55;
 const MAX_PITCH = 1.15;
+
+/**
+ * One wheel notch, per `WheelEvent.deltaMode`.
+ *
+ * The same physical notch arrives as ~100 pixels, 3 lines or 1 page depending
+ * on the browser and the pointing device, so the raw `deltaY` is normalised to
+ * notches before it means anything. Using it unscaled is how a trackpad ends up
+ * zooming ten times faster than a mouse.
+ */
+const NOTCH_PER_DELTA = [1 / 100, 1 / 3, 1] as const;
 
 /**
  * Mouse look for the third-person camera.
@@ -50,6 +62,8 @@ export class MouseLook {
 
   private yawValue = 0;
   private pitchValue = 0.22;
+  /** Player zoom offset in world units. 0 is the authored framing. */
+  private zoomValue = 0;
   private suppressed = false;
   /** True while the left button is down and the pointer is NOT locked. */
   private dragging = false;
@@ -117,6 +131,17 @@ export class MouseLook {
     return this.pitchValue;
   }
 
+  /**
+   * How far the player has pushed the camera out, in world units.
+   *
+   * Already clamped, and RAW: the easing that makes a notch feel smooth belongs
+   * to the camera, exactly as the follow smoothing does. This accumulator is
+   * the player's request, not the shot.
+   */
+  get zoom(): number {
+    return this.zoomValue;
+  }
+
   /** True while the browser has the pointer captured. */
   get locked(): boolean {
     return !!this.canvas && document.pointerLockElement === this.canvas;
@@ -161,6 +186,11 @@ export class MouseLook {
   attach(canvas: HTMLElement): void {
     this.canvas = canvas;
     canvas.addEventListener('mousedown', this.onMouseDown);
+    // Bound to the CANVAS and not the window, for the same reason `mousedown`
+    // is: every panel is DOM above it and stops the event first, so a wheel
+    // aimed at a scrolling shop list can never also zoom the camera. Not
+    // passive, because the page must not scroll underneath the game.
+    canvas.addEventListener('wheel', this.onWheel, { passive: false });
     window.addEventListener('mouseup', this.onMouseUp);
     window.addEventListener('mousemove', this.onMouseMove);
     window.addEventListener('blur', this.onBlur);
@@ -170,6 +200,7 @@ export class MouseLook {
 
   detach(): void {
     this.canvas?.removeEventListener('mousedown', this.onMouseDown);
+    this.canvas?.removeEventListener('wheel', this.onWheel);
     window.removeEventListener('mouseup', this.onMouseUp);
     window.removeEventListener('mousemove', this.onMouseMove);
     window.removeEventListener('blur', this.onBlur);
@@ -397,6 +428,41 @@ export class MouseLook {
         : this.pitchValue > MAX_PITCH
           ? MAX_PITCH
           : this.pitchValue;
+  }
+
+  /**
+   * The wheel pushes the camera out and pulls it in.
+   *
+   * Deliberately NOT gated on the pointer lock, unlike looking. Zoom is a
+   * framing preference rather than an act of aiming, and the moment it is most
+   * wanted is while standing in the arena reading a board with the cursor
+   * out - which is exactly when the lock is not held.
+   */
+  private readonly onWheel = (event: WheelEvent): void => {
+    if (this.suppressed) return;
+    event.preventDefault();
+    const notches = event.deltaY * (NOTCH_PER_DELTA[event.deltaMode] ?? NOTCH_PER_DELTA[0]);
+    // Scrolling DOWN pushes the camera away, which is the convention every
+    // other third-person game in this style uses.
+    this.addZoomDelta(notches * CAMERA.zoomStep);
+  };
+
+  /**
+   * Apply a zoom delta already scaled to WORLD UNITS.
+   *
+   * The one place the zoom is written and the only place it is clamped, so a
+   * pinch gesture added later cannot invent a second set of limits - the same
+   * arrangement `addLookDelta` has for the pitch clamp.
+   */
+  addZoomDelta(delta: number): void {
+    if (this.suppressed || !Number.isFinite(delta)) return;
+    const next = this.zoomValue + delta;
+    this.zoomValue =
+      next < CAMERA.zoomMin
+        ? CAMERA.zoomMin
+        : next > CAMERA.zoomMax
+          ? CAMERA.zoomMax
+          : next;
   }
 
   private readonly onBlur = (): void => {
