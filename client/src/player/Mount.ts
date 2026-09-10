@@ -1,5 +1,5 @@
 import { animalForSlot, type AnimalAnimationState } from '@animal/shared';
-import { Group, Object3D } from 'three';
+import { Group, Mesh, Object3D } from 'three';
 import { AnimalModel } from '../animal/AnimalModel.js';
 import { AnimalAnimator } from '../animation/AnimalAnimator.js';
 import type { AnimationInput } from '../animation/AnimationInput.js';
@@ -46,12 +46,19 @@ export class Mount {
 
   animal: AnimalModel;
   animalAnimator: AnimalAnimator;
-  readonly riderAnimator: RiderAnimator;
-  readonly rig: PlayerRig;
+  /**
+   * Rebuilt when the RIDER is swapped, which is why neither is readonly.
+   *
+   * A Bloxity avatar is a different model with a different skeleton object, and
+   * `PlayerRig` binds to the bones it was handed at construction - so a swap
+   * has to rebuild both rather than repoint them.
+   */
+  riderAnimator: RiderAnimator;
+  rig: PlayerRig;
 
   /** Carries the rider's posting bob. Never the physics transform. */
   private readonly riderVisual = new Group();
-  private readonly riderModel: Object3D;
+  private riderModel: Object3D;
 
   /**
    * The rider's own nodes, for the Bloxity cosmetics layer.
@@ -87,6 +94,37 @@ export class Mount {
     this.animalAnimator = new AnimalAnimator(this.animal);
     this.riderAnimator = new RiderAnimator(this.rig, this.riderVisual);
     this.worldRoot.add(this.trail.root);
+  }
+
+  /**
+   * Swap the rider, keeping the same mount.
+   *
+   * The mirror of `setAnimalSlot`, and for the same reason: the two halves are
+   * independent, so dressing a player as their Bloxity avatar must not disturb
+   * the animal they are sitting on, its gait, or where it is standing.
+   *
+   * Passing null restores the bundled default character, which is what a sign
+   * out and every failed asset load resolve to.
+   *
+   * The rig and the rider animator are REBUILT rather than repointed: both are
+   * bound to specific `Bone` objects, and the incoming model has its own. The
+   * bind is by NAME and the rest pose is read off whichever model arrives, so
+   * the Bloxity skeleton and `player.fbx` are equally valid inputs.
+   */
+  setRider(model: Object3D | null): void {
+    const next = model ?? playerModelLoader.createInstance();
+    if (next === this.riderModel) return;
+
+    const previous = this.riderModel;
+    previous.removeFromParent();
+    releaseRider(previous);
+
+    this.riderModel = next;
+    next.rotation.y = PLAYER_MODEL_YAW_OFFSET;
+    this.riderVisual.add(next);
+
+    this.rig = new PlayerRig(next, next);
+    this.riderAnimator = new RiderAnimator(this.rig, this.riderVisual);
   }
 
   /** Show the trail the server says this player is wearing. Cosmetic only. */
@@ -188,3 +226,24 @@ export class Mount {
     this.worldRoot.removeFromParent();
   }
 }
+
+/**
+ * Let go of a rider that has been swapped out.
+ *
+ * ONLY its material, and only when the rider was one this game built for a
+ * Bloxity avatar. Geometry is deliberately left alone: part meshes are cached
+ * and shared between every player wearing the same item, so disposing one
+ * here would empty the arms of everybody else in the room. A default rider
+ * shares even its material with every other default rider, which is why the
+ * flag is checked rather than assumed.
+ */
+const releaseRider = (model: Object3D): void => {
+  if (model.userData['bloxityRider'] !== true) return;
+  model.traverse((child) => {
+    const mesh = child as Mesh;
+    if (!mesh.isMesh) return;
+    const material = mesh.material;
+    if (Array.isArray(material)) material.forEach((entry) => entry.dispose());
+    else material?.dispose();
+  });
+};

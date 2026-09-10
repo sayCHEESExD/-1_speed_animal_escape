@@ -1,3 +1,5 @@
+import type { AvatarAppearance, AvatarProportions } from './avatar.js';
+
 /**
  * Client -> server input (MessageType.Move).
  *
@@ -93,4 +95,15 @@ export interface BuyTrailMessage {
 /** Client -> server: wear an owned trail, or 0 to take it off. */
 export interface EquipTrailMessage {
   slot: number;
+}
+
+/**
+ * Client -> server: the player's Bloxity appearance.
+ *
+ * Sent on join and again whenever the portal reports a change, so a player who
+ * re-dresses mid-run is re-drawn for everyone without a reload.
+ */
+export interface SetAvatarMessage {
+  appearance: AvatarAppearance;
+  proportions: AvatarProportions;
 }

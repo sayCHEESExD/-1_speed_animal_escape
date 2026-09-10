@@ -1,6 +1,8 @@
 import { DEATH } from '../config/animationConfig.js';
 import { createAnimationInput, type AnimationInput } from '../animation/AnimationInput.js';
 import type { NetPlayerState } from '../net/netTypes.js';
+import { AvatarDresser } from '../bloxity/AvatarDresser.js';
+import { lookFromState } from '../bloxity/avatarLook.js';
 import { Mount } from './Mount.js';
 
 /** Seconds a remote transform is smoothed over. */
@@ -49,8 +51,23 @@ export class RemotePlayer {
 
   private placed = false;
 
+  /**
+   * This player's Bloxity appearance, built from replicated ids.
+   *
+   * Remote riders used to keep the bundled character on the grounds that
+   * fetching somebody else's cosmetics was a lot of traffic for something
+   * glimpsed in passing. That is no longer the trade: the ids arrive as part
+   * of the patch that was coming anyway, and every asset behind them is cached
+   * by URL, so a lobby of ten players in the same starter skin fetches it
+   * once.
+   */
+  private readonly dresser: AvatarDresser;
+  /** The look last applied, so an unchanged patch does nothing. */
+  private lastLook = '';
+
   constructor(state: NetPlayerState) {
     this.mount = new Mount(state.animalSlot);
+    this.dresser = new AvatarDresser(this.mount);
     this.apply(state);
     this.mount.setPosition(this.targetX, this.targetY, this.targetZ);
     this.mount.setYaw(this.targetYaw);
@@ -80,11 +97,31 @@ export class RemotePlayer {
 
     this.mount.setAnimalSlot(state.animalSlot);
     this.mount.setTrailSlot(state.trailSlot);
+    this.dressFrom(state);
 
     if (this.lastDeathCount >= 0 && state.deathCount > this.lastDeathCount) {
       this.deathTime = 0;
     }
     this.lastDeathCount = state.deathCount;
+  }
+
+  /**
+   * Wear whatever the room says this player is wearing.
+   *
+   * Called on every patch, so it is compared first: Colyseus re-delivers the
+   * whole player object on any change, and rebuilding a body because somebody
+   * moved would be a fetch per frame.
+   */
+  private dressFrom(state: NetPlayerState): void {
+    const avatar = state.avatar;
+    if (!avatar) return;
+
+    const look = lookFromState(avatar);
+    const key = JSON.stringify(look);
+    if (key === this.lastLook) return;
+    this.lastLook = key;
+
+    this.dresser.setLook(look.appearance, look.proportions);
   }
 
   /** Advance interpolation and animation. */
@@ -133,6 +170,7 @@ export class RemotePlayer {
   }
 
   dispose(): void {
+    this.dresser.dispose();
     this.mount.dispose();
   }
 }

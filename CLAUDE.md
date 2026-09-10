@@ -575,13 +575,47 @@ script in `index.html`, BEFORE the module bundle.
 - A purchase is made by the ACCOUNT, not the browser. The client sends its
   Bloxity id as a join option alongside the browser-stored `playerId`; they are
   different identities and the grant is addressed to the account.
-- **Cosmetics are applied to the LOCAL rider only** - skin texture, hat, back
-  item and proportions. Remote riders keep the shared default material.
-- **The body-part slots are deliberately NOT worn.** Head, torso, arms and legs
-  are separate GLB meshes that would replace `player.fbx`, which is this
-  project's canonical player asset with the rig the whole animation system is
-  bound to. Swapping it at runtime is a second player asset by another name.
-  The ids are read and logged so the data is visibly arriving.
+- **A player is drawn as their real Bloxity avatar, local and remote alike.**
+  The two rigs turned out to be THE SAME RIG: Bloxity's `player.glb` carries
+  the twelve bone names `PlayerRig` binds, so it is a drop-in body - it even
+  measures the same 3.2 units. That is what makes this possible at all, and
+  why the earlier rule against wearing body parts no longer holds.
+- The body is `player.glb` and the PARTS are geometry swapped onto its
+  skeleton, which is what Bloxity's own renderer does and the only thing a part
+  mesh means: it is authored against that one shared rig. Swapping needs the
+  `skinIndex` values retargeted BY BONE NAME, because each part ships its own
+  copy of the rig in its own joint order.
+- **The bundled `player.fbx` remains the fallback**, and it is reached by three
+  different roads that all mean the same thing: signed out, an item the
+  catalogue does not know, or an asset that would not load. It is also what is
+  on screen while a Bloxity body is still downloading - a rider is never
+  nothing.
+- **No asset URL is built from an id.** `GET /v1/avatar/items/{id}` hands back
+  an `assetPaths` object and those paths are used verbatim, so an item Bloxity
+  moves keeps working. The only literal path is the base body's, which has no
+  catalogue entry; the SDK loads it by literal too.
+- `AvatarDresser` is the ONE thing that decides which body a rider has, and it
+  is shared by the local player and every remote one - a player who looked one
+  way on their own screen and another way on everyone else's is exactly the bug
+  two code paths would produce. A body is rebuilt only when a body PART
+  changes: a hat, a skin or a proportion applies to whatever body is mounted.
+- The appearance is the ONE replicated field that originates with a client, and
+  that is safe because it decides nothing - it chooses meshes and a texture. It
+  is sanitised on arrival, never persisted, and read by no service. Nothing
+  private goes with it: ids only, never the account.
+- **`forceHeadId` is a head REPLACEMENT, not a hiding flag** - the name invites
+  the wrong reading. Bloxity's customiser applies it as
+  `equipped.headId = hat.forceHeadId` when the hat is equipped, and its
+  renderer treats a head of `'-1'` as "put the stock head back" rather than as
+  "draw no head". All three hats that declare it today declare `'-1'`, meaning
+  the helmet is modelled around the default head and a custom one would poke
+  through. `AvatarDresser.forceHead` applies it again at render time, because a
+  look can reach this game from a join option or from replicated state rather
+  than from the customiser that enforced it.
+- A nested Colyseus schema does NOT bubble its changes to its parent, so
+  `avatar` needs its own `onChange`. Without one a player who re-dressed
+  mid-run kept their old body on every other screen until they happened to
+  touch a field on `PlayerState` itself.
 - Proportions are written as SCALE and POSITION on bones, never rotation:
   `PlayerRig` rebuilds every bone's quaternion from its rest pose every frame,
   so a rotation written there would be gone before it was drawn.

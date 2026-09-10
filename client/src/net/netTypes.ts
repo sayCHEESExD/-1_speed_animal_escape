@@ -1,3 +1,4 @@
+import type { AvatarAppearance, AvatarProportions } from '@animal/shared';
 import type { AnimalAnimationState, PlayerMotionState } from '@animal/shared';
 import type { MapSchema } from '@colyseus/schema';
 
@@ -43,6 +44,15 @@ export interface NetPlayerState extends PlayerMotionState {
   /** Coyote window left, so a replayed jump off a lip is allowed identically. */
   coyote: number;
   ready: boolean;
+
+  /**
+   * How this player looks in the Bloxity portal.
+   *
+   * The only replicated field that began life on a client, and the only one
+   * that decides nothing: it chooses meshes and a texture. See
+   * `shared/src/types/avatar.ts`.
+   */
+  avatar: AvatarAppearance & AvatarProportions;
 }
 
 /** The replicated elephant. The one hazard that is state, not a formula. */

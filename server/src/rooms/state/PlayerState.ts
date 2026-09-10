@@ -1,4 +1,5 @@
 import { Schema, type } from '@colyseus/schema';
+import { AvatarState } from './AvatarState.js';
 import {
   AnimalAnimationState,
   INITIAL_OWNED_ANIMALS,
@@ -69,6 +70,16 @@ export class PlayerState extends Schema {
   @type('uint8') treadmill = 0;
 
   @type('string') animation: AnimationState = AnimalAnimationState.Idle;
+
+  /**
+   * How this player looks in the Bloxity portal.
+   *
+   * The ONE part of this schema that originates with a client, and the comment
+   * at the top of this file still holds everywhere it matters: this decides
+   * nothing. It is sanitised on arrival, it is cosmetic, and no service reads
+   * it. See `AvatarState`.
+   */
+  @type(AvatarState) avatar = new AvatarState();
 
   /** Server-authoritative progression. */
   @type('uint32') level = 1;

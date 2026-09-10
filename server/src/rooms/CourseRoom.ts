@@ -15,6 +15,9 @@ import {
   type RespawnMessage,
   type RespawnReason,
   type StageAwardedMessage,
+  sanitizeAppearance,
+  sanitizeProportions,
+  type SetAvatarMessage,
 } from '@animal/shared';
 import { serverConfig } from '../config/serverConfig.js';
 import { MovementService } from '../movement/MovementService.js';
@@ -43,6 +46,12 @@ interface JoinOptions {
   name?: string;
   /** The Bloxity account id, when the player is signed in to the portal. */
   bloxityId?: string;
+  /**
+   * The player's Bloxity appearance, so they are drawn correctly by everyone
+   * already in the room from their very first patch rather than after a
+   * follow-up message has made the round trip.
+   */
+  avatar?: SetAvatarMessage;
 }
 
 /**
@@ -114,6 +123,9 @@ export class CourseRoom extends Room<CourseState> {
     this.onMessage(MessageType.BuyTrail, (client, message: BuyTrailMessage) =>
       this.onBuyTrail(client, message),
     );
+    this.onMessage(MessageType.SetAvatar, (client, message: SetAvatarMessage) =>
+      this.onSetAvatar(client, message),
+    );
     this.onMessage(MessageType.EquipTrail, (client, message: EquipTrailMessage) =>
       this.onEquipTrail(client, message),
     );
@@ -183,6 +195,8 @@ export class CourseRoom extends Room<CourseState> {
       // Anything bought while they were away, or in another session.
       this.applyGrants(client.sessionId, player);
     }
+    if (options.avatar) this.writeAvatar(player, options.avatar);
+
     this.rebirths.sync(player);
 
     // `initialise` reset the level to 1 for a fresh profile; a restored one
@@ -337,6 +351,32 @@ export class CourseRoom extends Room<CourseState> {
     if (!player) return;
     if (!this.trails.equip(player, message?.slot, this.speeds).ok) return;
     this.persist(client.sessionId, player);
+  }
+
+  /**
+   * "This is what I look like."
+   *
+   * Accepted rather than adjudicated, which is the opposite of every other
+   * client message here and is safe for one reason: the payload decides
+   * nothing. The portal owns a player's appearance and this server has no way
+   * to ask it, so the client is the only source of the truth - and the worst a
+   * forged one achieves is wearing a hat it did not buy, on its own screen and
+   * everyone else's. It is NOT persisted: the appearance lives in the player's
+   * Bloxity account, and a copy in the profile would be a second one to keep
+   * in step with the first.
+   */
+  private onSetAvatar(client: Client, message: SetAvatarMessage): void {
+    const player = this.state.players.get(client.sessionId);
+    if (!player) return;
+    this.writeAvatar(player, message);
+  }
+
+  /** Sanitise, then write in place. The one path an appearance is set by. */
+  private writeAvatar(player: PlayerState, message: SetAvatarMessage): void {
+    player.avatar.apply(
+      sanitizeAppearance(message?.appearance),
+      sanitizeProportions(message?.proportions),
+    );
   }
 
   /**

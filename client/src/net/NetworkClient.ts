@@ -5,6 +5,7 @@ import {
   type ClaimStageMessage,
   type MoveMessage,
   type RespawnMessage,
+  type SetAvatarMessage,
   type StageAwardedMessage,
 } from '@animal/shared';
 import { Client, getStateCallbacks, type Room } from 'colyseus.js';
@@ -102,11 +103,35 @@ export class NetworkClient {
    */
   private identity: (() => string | null) | null = null;
 
+  /**
+   * The local player's Bloxity look, asked for at JOIN time.
+   *
+   * A provider rather than a stored value, for the same reason `Bloxity` never
+   * caches the user: the avatar can change between a disconnect and the
+   * reconnect that follows, and a value captured early would re-join wearing
+   * whatever was equipped when the page loaded.
+   */
+  private look: (() => SetAvatarMessage | null) | null = null;
+
   constructor(handlers: NetworkHandlers = {}) {
     this.handlers = handlers;
   }
 
   /** Where the room should get the Bloxity account id from, if there is one. */
+  setLookProvider(provider: () => SetAvatarMessage | null): void {
+    this.look = provider;
+  }
+
+  /**
+   * Tell the room what the player looks like.
+   *
+   * Cosmetic, and the server treats it as such - it is sanitised and
+   * replicated, never trusted for anything that decides an outcome.
+   */
+  sendAvatar(message: SetAvatarMessage): void {
+    this.room?.send(MessageType.SetAvatar, message);
+  }
+
   setIdentityProvider(provider: () => string | null): void {
     this.identity = provider;
   }
@@ -167,6 +192,9 @@ export class NetworkClient {
           // Optional: a signed-out player simply has none, and the room falls
           // back to the browser-stored id exactly as it always did.
           bloxityId: this.identity?.() ?? undefined,
+          // Sent with the join rather than after it, so players already in the
+          // room draw this one correctly from their very first patch.
+          avatar: this.look?.() ?? undefined,
         });
         break;
       } catch (error) {
@@ -295,6 +323,14 @@ export class NetworkClient {
     $(room.state).players.onAdd((player, sessionId) => {
       this.handlers.onPlayerAdded?.(sessionId, player);
       $(player).onChange(() => {
+        this.handlers.onPlayerChanged?.(sessionId, player);
+      });
+      // A NESTED schema's changes do not bubble to its parent, so the avatar
+      // needs a listener of its own: without one a player who re-dressed
+      // mid-run kept their old body on everybody else's screen until they
+      // moved far enough to touch a field on `player` itself. Both paths hand
+      // back the same `player`, so the receiving end cannot tell which fired.
+      $(player.avatar).onChange(() => {
         this.handlers.onPlayerChanged?.(sessionId, player);
       });
     });
