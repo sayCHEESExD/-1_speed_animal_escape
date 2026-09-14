@@ -601,15 +601,6 @@ script in `index.html`, BEFORE the module bundle.
 - A purchase is made by the ACCOUNT, not the browser. The client sends its
   Bloxity id as a join option alongside the browser-stored `playerId`; they are
   different identities and the grant is addressed to the account.
-<<<<<<< Updated upstream
-- **Cosmetics are applied to the LOCAL rider only** - skin texture, hat, back
-  item and proportions. Remote riders keep the shared default material.
-- **The body-part slots are deliberately NOT worn.** Head, torso, arms and legs
-  are separate GLB meshes that would replace `player.fbx`, which is this
-  project's canonical player asset with the rig the whole animation system is
-  bound to. Swapping it at runtime is a second player asset by another name.
-  The ids are read and logged so the data is visibly arriving.
-=======
 - **A player is drawn as their real Bloxity avatar, local and remote alike.**
   The two rigs turned out to be THE SAME RIG: Bloxity's `player.glb` carries
   the twelve bone names `PlayerRig` binds, so it is a drop-in body - it even
@@ -667,7 +658,6 @@ script in `index.html`, BEFORE the module bundle.
   `avatar` needs its own `onChange`. Without one a player who re-dressed
   mid-run kept their old body on every other screen until they happened to
   touch a field on `PlayerState` itself.
->>>>>>> Stashed changes
 - Proportions are written as SCALE and POSITION on bones, never rotation:
   `PlayerRig` rebuilds every bone's quaternion from its rest pose every frame,
   so a rotation written there would be gone before it was drawn.

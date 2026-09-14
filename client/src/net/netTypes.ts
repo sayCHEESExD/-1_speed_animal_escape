@@ -1,3 +1,4 @@
+import type { AvatarAppearance, AvatarProportions } from '@animal/shared';
 import type { AnimalAnimationState, PlayerMotionState } from '@animal/shared';
 import type { MapSchema } from '@colyseus/schema';
 
@@ -43,8 +44,6 @@ export interface NetPlayerState extends PlayerMotionState {
   /** Coyote window left, so a replayed jump off a lip is allowed identically. */
   coyote: number;
   ready: boolean;
-<<<<<<< Updated upstream
-=======
 
   /**
    * How this player looks in the Bloxity portal.
@@ -62,7 +61,6 @@ export interface NetPlayerState extends PlayerMotionState {
   displayName: string;
   /** Their Bloxity portrait URL, or '' for none. */
   pfp: string;
->>>>>>> Stashed changes
 }
 
 /** The replicated elephant. The one hazard that is state, not a formula. */

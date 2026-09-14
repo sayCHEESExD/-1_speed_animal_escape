@@ -1,6 +1,8 @@
 import { DEATH } from '../config/animationConfig.js';
 import { createAnimationInput, type AnimationInput } from '../animation/AnimationInput.js';
 import type { NetPlayerState } from '../net/netTypes.js';
+import { AvatarDresser } from '../bloxity/AvatarDresser.js';
+import { lookFromState } from '../bloxity/avatarLook.js';
 import { Mount } from './Mount.js';
 
 /** Seconds a remote transform is smoothed over. */
@@ -49,8 +51,6 @@ export class RemotePlayer {
 
   private placed = false;
 
-<<<<<<< Updated upstream
-=======
   /** The replicated name and portrait, read by the nameplates. Cosmetic only. */
   displayName = '';
   pfp = '';
@@ -69,9 +69,9 @@ export class RemotePlayer {
   /** The look last applied, so an unchanged patch does nothing. */
   private lastLook = '';
 
->>>>>>> Stashed changes
   constructor(state: NetPlayerState) {
     this.mount = new Mount(state.animalSlot);
+    this.dresser = new AvatarDresser(this.mount);
     this.apply(state);
     this.mount.setPosition(this.targetX, this.targetY, this.targetZ);
     this.mount.setYaw(this.targetYaw);
@@ -101,17 +101,33 @@ export class RemotePlayer {
 
     this.mount.setAnimalSlot(state.animalSlot);
     this.mount.setTrailSlot(state.trailSlot);
-<<<<<<< Updated upstream
-=======
     this.dressFrom(state);
     this.displayName = state.displayName ?? '';
     this.pfp = state.pfp ?? '';
->>>>>>> Stashed changes
 
     if (this.lastDeathCount >= 0 && state.deathCount > this.lastDeathCount) {
       this.deathTime = 0;
     }
     this.lastDeathCount = state.deathCount;
+  }
+
+  /**
+   * Wear whatever the room says this player is wearing.
+   *
+   * Called on every patch, so it is compared first: Colyseus re-delivers the
+   * whole player object on any change, and rebuilding a body because somebody
+   * moved would be a fetch per frame.
+   */
+  private dressFrom(state: NetPlayerState): void {
+    const avatar = state.avatar;
+    if (!avatar) return;
+
+    const look = lookFromState(avatar);
+    const key = JSON.stringify(look);
+    if (key === this.lastLook) return;
+    this.lastLook = key;
+
+    this.dresser.setLook(look.appearance, look.proportions);
   }
 
   /** Advance interpolation and animation. */
@@ -160,6 +176,7 @@ export class RemotePlayer {
   }
 
   dispose(): void {
+    this.dresser.dispose();
     this.mount.dispose();
   }
 }

@@ -15,6 +15,9 @@ import {
   type RespawnMessage,
   type RespawnReason,
   type StageAwardedMessage,
+  sanitizeAppearance,
+  sanitizeProportions,
+  type SetAvatarMessage,
 } from '@animal/shared';
 import { serverConfig } from '../config/serverConfig.js';
 import { MovementService } from '../movement/MovementService.js';
@@ -52,6 +55,12 @@ interface JoinOptions {
   pfp?: string;
   /** The Bloxity account id, when the player is signed in to the portal. */
   bloxityId?: string;
+  /**
+   * The player's Bloxity appearance, so they are drawn correctly by everyone
+   * already in the room from their very first patch rather than after a
+   * follow-up message has made the round trip.
+   */
+  avatar?: SetAvatarMessage;
 }
 
 /**
@@ -123,15 +132,12 @@ export class CourseRoom extends Room<CourseState> {
     this.onMessage(MessageType.BuyTrail, (client, message: BuyTrailMessage) =>
       this.onBuyTrail(client, message),
     );
-<<<<<<< Updated upstream
-=======
     this.onMessage(MessageType.SetAvatar, (client, message: SetAvatarMessage) =>
       this.onSetAvatar(client, message),
     );
     this.onMessage(MessageType.SetIdentity, (client, message: SetIdentityMessage) =>
       this.onSetIdentity(client, message),
     );
->>>>>>> Stashed changes
     this.onMessage(MessageType.EquipTrail, (client, message: EquipTrailMessage) =>
       this.onEquipTrail(client, message),
     );
@@ -201,14 +207,11 @@ export class CourseRoom extends Room<CourseState> {
       // Anything bought while they were away, or in another session.
       this.applyGrants(client.sessionId, player);
     }
-<<<<<<< Updated upstream
-=======
     if (options.avatar) this.writeAvatar(player, options.avatar);
     // Always written, even for a player who sent nothing: that is what gives a
     // signed-out rider their derived handle rather than a blank nameplate.
     this.writeIdentity(client.sessionId, player, { name: options.name, pfp: options.pfp });
 
->>>>>>> Stashed changes
     this.rebirths.sync(player);
 
     // `initialise` reset the level to 1 for a fresh profile; a restored one
@@ -366,8 +369,6 @@ export class CourseRoom extends Room<CourseState> {
   }
 
   /**
-<<<<<<< Updated upstream
-=======
    * "This is what I look like."
    *
    * Accepted rather than adjudicated, which is the opposite of every other
@@ -432,7 +433,6 @@ export class CourseRoom extends Room<CourseState> {
   }
 
   /**
->>>>>>> Stashed changes
    * The per-tick pass the client cannot influence.
    *
    * Deaths are decided HERE, from the position the server simulated and the

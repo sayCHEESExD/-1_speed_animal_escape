@@ -16,11 +16,8 @@ export * from './config/handles.js';
 export * from './config/rebirth.js';
 export * from './config/trails.js';
 export * from './config/speed.js';
-<<<<<<< Updated upstream
-=======
 export * from './types/avatar.js';
 export * from './types/identity.js';
->>>>>>> Stashed changes
 export * from './types/math.js';
 export * from './types/messages.js';
 export * from './types/player.js';

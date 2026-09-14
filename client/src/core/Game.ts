@@ -5,14 +5,10 @@ import {
 } from '@animal/shared';
 import { AudioManager } from '../audio/AudioManager.js';
 import { Bloxity } from '../bloxity/Bloxity.js';
-<<<<<<< Updated upstream
-import { BloxityAvatar } from '../bloxity/BloxityAvatar.js';
-=======
 import { AvatarDresser } from '../bloxity/AvatarDresser.js';
 import { identityFromLegion } from '../bloxity/identity.js';
 import { Nameplates } from '../ui/Nameplates.js';
 import { lookFromLegion } from '../bloxity/avatarLook.js';
->>>>>>> Stashed changes
 import { PlayerAudio } from '../audio/PlayerAudio.js';
 import { Vector3 } from 'three';
 import { ThirdPersonCamera } from '../camera/ThirdPersonCamera.js';
@@ -110,7 +106,7 @@ export class Game {
   private readonly bloxityPanel: BloxityPanel;
   private readonly fpsReadout: HTMLDivElement;
   /** Cosmetics on the local rider. Built once the model exists. */
-  private bloxityAvatar: BloxityAvatar | null = null;
+  private dresser: AvatarDresser | null = null;
   /** Latest equipped/proportions, held until the rider is built. */
   private pendingAvatar: (() => void) | null = null;
   private fpsAccum = 0;
@@ -224,11 +220,6 @@ export class Game {
       respawn: () => this.network.requestRespawn(),
       pointerLockChanged: (locked) => this.input.look.setCursorFree(!locked),
       avatarChanged: (equipped, proportions) => {
-<<<<<<< Updated upstream
-        const apply = (): void => this.bloxityAvatar?.apply(equipped, proportions);
-        // Cosmetics can arrive before the FBX has finished loading.
-        if (this.bloxityAvatar) apply();
-=======
         const look = lookFromLegion(equipped, proportions);
         // Everyone else has to see it too, so it goes on the wire as well as
         // onto the local rider. Sanitising is the SERVER's job; this sends
@@ -240,7 +231,6 @@ export class Game {
         const apply = (): void => this.dresser?.setLook(look.appearance, look.proportions);
         // The avatar can arrive before the bundled model has finished loading.
         if (this.dresser) apply();
->>>>>>> Stashed changes
         else this.pendingAvatar = apply;
       },
     });
@@ -304,8 +294,6 @@ export class Game {
     // The room needs to know which Bloxity account this is, or a purchase
     // fulfilled by webhook has no profile to land in.
     this.network.setIdentityProvider(() => this.bloxity.getUser()?._id ?? null);
-<<<<<<< Updated upstream
-=======
     // Asked for at JOIN time rather than pushed after it, so the room has this
     // player's appearance in the very first patch everyone else receives.
     this.network.setLookProvider(() =>
@@ -317,7 +305,6 @@ export class Game {
     // A login or a logout mid-session re-labels the player for everyone. The
     // server re-derives the fallback handle on a sign-out.
     this.bloxity.onUserChanged(() => this.syncIdentity());
->>>>>>> Stashed changes
 
     this.run = new RunController(this.world.collision, {
       claimStage: (index) => {
@@ -440,13 +427,11 @@ export class Game {
 
     this.localPlayer = new LocalPlayer(this.world.collision, STARTER_ANIMAL_SLOT);
 
-    // Cosmetics, on the LOCAL rider only. Remote riders keep the shared
-    // default material - their cosmetics are not ours to fetch, and a texture
-    // request per remote player is a lot of CDN traffic for something nobody
-    // looks at while it runs past.
-    const rider = this.localPlayer.mount.rider;
-    this.bloxityAvatar = new BloxityAvatar(rider.visual, rider.model);
-    // Anything that arrived while the FBX was still loading.
+    // The local rider's appearance. Remote riders are dressed by the same
+    // class from their replicated look, so both sides of the wire build a
+    // player out of exactly one code path.
+    this.dresser = new AvatarDresser(this.localPlayer.mount);
+    // Anything that arrived while the bundled model was still loading.
     this.pendingAvatar?.();
     this.pendingAvatar = null;
 
@@ -774,12 +759,8 @@ ${identity.pfp}`;
     window.removeEventListener('touchstart', this.onGesture);
     this.bloxity.dispose();
     this.bloxityPanel.dispose();
-<<<<<<< Updated upstream
-    this.bloxityAvatar?.dispose();
-=======
     this.dresser?.dispose();
     this.nameplates.dispose();
->>>>>>> Stashed changes
     this.fpsReadout.remove();
     this.audio.dispose();
     this.rebirthButton.dispose();

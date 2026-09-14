@@ -1,4 +1,5 @@
 import { Schema, type } from '@colyseus/schema';
+import { AvatarState } from './AvatarState.js';
 import {
   AnimalAnimationState,
   INITIAL_OWNED_ANIMALS,
@@ -70,8 +71,6 @@ export class PlayerState extends Schema {
 
   @type('string') animation: AnimationState = AnimalAnimationState.Idle;
 
-<<<<<<< Updated upstream
-=======
   /**
    * How this player looks in the Bloxity portal.
    *
@@ -104,7 +103,6 @@ export class PlayerState extends Schema {
    */
   accountName = '';
 
->>>>>>> Stashed changes
   /** Server-authoritative progression. */
   @type('uint32') level = 1;
   /**
