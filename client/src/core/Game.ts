@@ -412,6 +412,10 @@ export class Game {
    */
   startBloxity(): void {
     this.bloxity.start();
+    // Inside the portal, its logo and menu pill are drawn over our top-left
+    // corner from the parent page. The stylesheet keeps the HUD clear of it,
+    // but only while this is true - standalone there is nothing there.
+    document.body.classList.toggle('aoe-portal-embedded', this.bloxity.embedded);
   }
 
   /** Progress, for the portal's loading screen. */

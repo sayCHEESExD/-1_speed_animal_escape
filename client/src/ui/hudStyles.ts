@@ -774,14 +774,19 @@ body.aoe-touch-mode .aoe-rail { --aoe-rail: 62px; }
   .aoe-panel__close { width: 28px; height: 28px; font-size: 14px; border-radius: 9px; }
   .aoe-panel__body { padding: 10px 12px 12px; }
 
-  /* The rail climbs into the top-left corner and sizes itself by HEIGHT, so it
-   * ends well above the stick however short the screen is. */
+  /* The rail becomes a ROW across the top-left. A column, however small its
+   * tiles, still runs down the left edge toward the stick on a screen this
+   * short; a row is one tile tall and cannot reach it at any height.
+   * Inside the Bloxity portal the portal draws its own logo and menu pill
+   * over that same corner - on top of our page, where nothing in it can be
+   * measured or clicked through - so the row drops below it there. */
   body.aoe-touch-mode .aoe-rail {
-    --aoe-rail: clamp(40px, 12.5vh, 58px);
-    top: max(8px, env(safe-area-inset-top, 0px));
+    --aoe-rail: clamp(40px, 12.5vh, 52px);
+    flex-direction: row;
+    top: calc(max(8px, env(safe-area-inset-top, 0px)) + var(--aoe-portal-top, 0px));
     left: max(10px, env(safe-area-inset-left, 0px));
     transform: none;
-    gap: clamp(9px, 3.4vh, 14px);
+    gap: 12px;
   }
   body.aoe-touch-mode .aoe-tile { border-width: 3px; border-radius: 13px; }
   body.aoe-touch-mode .aoe-tile__label { font-size: 10px; bottom: -7px; }
@@ -795,9 +800,18 @@ body.aoe-touch-mode .aoe-rail { --aoe-rail: 62px; }
     line-height: 14px;
   }
   body.aoe-touch-mode .aoe-account__name { max-width: 22vw; }
-  /* The FPS readout shared the rail's corner; it moves beside the column. */
-  body.aoe-touch-mode .aoe-fps { left: calc(max(10px, env(safe-area-inset-left, 0px)) + 72px); }
+  /* The FPS readout shared the rail's corner; it moves under the row. */
+  body.aoe-touch-mode .aoe-fps {
+    top: calc(max(8px, env(safe-area-inset-top, 0px)) + var(--aoe-portal-top, 0px) + 66px);
+  }
 }
+
+/*
+ * The height of the portal's own overlay, as measured on a phone in landscape:
+ * its logo and menu pill run from 7px to about 50px down the top-left corner.
+ * Set only while embedded - standalone there is no overlay to clear.
+ */
+body.aoe-portal-embedded { --aoe-portal-top: 52px; }
 `;
   document.head.appendChild(style);
 };

@@ -448,11 +448,18 @@ floats over every rider's head.
 - **A phone on its side** is `(orientation: landscape) and (max-height: 500px)`,
   and every rule for it is scoped to that query so desktop and portrait are
   untouched. The rail was centred vertically, which on a 360px-tall screen put
-  the Sound tile ON the movement stick, so it climbs to the top-left and sizes
-  by height; the Speed bar was lifted 96px clear of the thumbs, which put it
+  the Sound tile ON the movement stick, so it becomes a ROW across the
+  top-left - one tile tall, so it cannot reach the stick at any height; the
+  Speed bar was lifted 96px clear of the thumbs, which put it
   across the rider, so it returns to the bottom edge and narrows to the gap
   between the stick and jump button, measured from the same vmin they are.
   Safe-area insets are applied there too: in landscape the notch is on a side.
+- **Inside the Bloxity portal the top-left corner is not ours.** The portal
+  draws its logo and menu pill OVER the game frame, from the parent page, so
+  nothing in the game can measure it or click through it - it once sat right
+  on the Rebirth tile. `body.aoe-portal-embedded` (set from
+  `Bloxity.embedded`) supplies `--aoe-portal-top`, and the landscape rail
+  drops below it. Standalone, the variable is zero.
 - **Every menu must be reachable with a mouse.** Pointer lock hides the cursor,
   every panel opens from a rail tile, and a button you can neither see nor
   click is not a menu - so `MouseLook.cursorFree` is a real state: Escape hands
