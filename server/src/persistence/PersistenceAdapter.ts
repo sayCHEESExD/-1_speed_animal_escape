@@ -19,6 +19,12 @@ export interface StoredProfile {
   trailSlot: number;
   /** Highest stage ever finished. */
   bestStage: number;
+  /**
+   * The player's Bloxity name as last seen, or '' for a player who has only
+   * played signed out. Public text and never an account id - kept only so the
+   * boards can name somebody who is not currently connected.
+   */
+  displayName: string;
   /** Wall clock of the last save, for diagnostics and future pruning. */
   updatedAt: number;
 }

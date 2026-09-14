@@ -43,6 +43,26 @@ export interface NetPlayerState extends PlayerMotionState {
   /** Coyote window left, so a replayed jump off a lip is allowed identically. */
   coyote: number;
   ready: boolean;
+<<<<<<< Updated upstream
+=======
+
+  /**
+   * How this player looks in the Bloxity portal.
+   *
+   * The only replicated field that began life on a client, and the only one
+   * that decides nothing: it chooses meshes and a texture. See
+   * `shared/src/types/avatar.ts`.
+   */
+  avatar: AvatarAppearance & AvatarProportions;
+
+  /**
+   * The name on this player's nameplate and board rows: their Bloxity name, or
+   * the handle the server derived for a signed-out player. Never an id.
+   */
+  displayName: string;
+  /** Their Bloxity portrait URL, or '' for none. */
+  pfp: string;
+>>>>>>> Stashed changes
 }
 
 /** The replicated elephant. The one hazard that is state, not a formula. */

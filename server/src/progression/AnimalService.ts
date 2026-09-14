@@ -1,12 +1,11 @@
 import {
   COURSE,
-  STAND_ROW,
   animalBit,
   animalForSlot,
   bestOwnedAnimal,
   ownsAnimal,
-  standZ,
   type AnimalDefinition,
+  standSlotAt,
 } from '@animal/shared';
 import type { PlayerState } from '../rooms/state/PlayerState.js';
 import type { SpeedService } from './SpeedService.js';
@@ -60,18 +59,11 @@ export class AnimalService {
    * turns "near an animal" into "may claim it".
    */
   standAt(x: number, y: number, z: number): number | null {
-    // The line-up is a COLUMN down the arena's left wall, so the fixed axis is
-    // X and the per-slot axis is Z. A row across the middle of a room this big
-    // would have cut straight through the space it exists to provide.
-    if (Math.abs(x - STAND_ROW.x) > STAND_ROW.claimRadius) return null;
     if (y < COURSE.floorY - 1 || y > COURSE.floorY + 4) return null;
-
-    for (let slot = 1; slot <= 32; slot += 1) {
-      const animal = animalForSlot(slot);
-      if (animal.slot !== slot) break;
-      if (Math.abs(z - standZ(slot)) <= STAND_ROW.claimRadius) return slot;
-    }
-    return null;
+    // The footprint test is shared with the client, so the stand a player asks
+    // about and the stand the server charges for cannot disagree - and adding
+    // a column of stands is one definition to change rather than two.
+    return standSlotAt(x, z);
   }
 
   /** Resolve a claim. The server decides; the client only asked. */

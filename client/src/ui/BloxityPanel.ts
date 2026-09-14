@@ -23,8 +23,38 @@ class ContentPanel extends Panel {
   }
 }
 
-/** Fallback portrait, from the portal's own CDN. */
-const DEFAULT_PFP = 'https://static.bloxity.io/img/pfps/0.png?width=128&quality=85';
+/**
+ * Fallback portrait, from the portal's own CDN.
+ *
+ * In the form the SDK itself builds portraits: `s0` is the default avatar's
+ * signature, and `v=2` is the renderer version. The older `pfps/0.png` address
+ * now redirects to a 404, which is what left every portrait-less player with a
+ * broken image.
+ */
+const DEFAULT_PFP = 'https://static.bloxity.io/img/pfps/s0.png?width=128&quality=85&v=2';
+
+/**
+ * A portrait image that never shows the broken-image icon.
+ *
+ * A player's own portrait that fails falls back to the default once; if that
+ * fails too the image is hidden, and the name beside it is still a complete
+ * row - the same rule the nameplates follow.
+ */
+const portrait = (className: string, src: string | undefined): HTMLImageElement => {
+  const img = document.createElement('img');
+  img.className = className;
+  img.alt = '';
+  img.draggable = false;
+  img.addEventListener('error', () => {
+    if (img.getAttribute('src') !== DEFAULT_PFP) {
+      img.src = DEFAULT_PFP;
+      return;
+    }
+    img.hidden = true;
+  });
+  img.src = src || DEFAULT_PFP;
+  return img;
+};
 
 /**
  * What Bux buys, by SKU.
@@ -125,11 +155,7 @@ export class BloxityPanel {
       return;
     }
 
-    const pfp = document.createElement('img');
-    pfp.className = 'aoe-account__pfp';
-    pfp.src = user.pfp || DEFAULT_PFP;
-    pfp.alt = '';
-    pfp.draggable = false;
+    const pfp = portrait('aoe-account__pfp', user.pfp);
 
     const name = document.createElement('span');
     name.className = 'aoe-account__name';
@@ -198,11 +224,7 @@ export class BloxityPanel {
     const row = document.createElement('div');
     row.className = 'aoe-friend';
 
-    const pfp = document.createElement('img');
-    pfp.className = 'aoe-friend__pfp';
-    pfp.src = friend.pfp || DEFAULT_PFP;
-    pfp.alt = '';
-    pfp.draggable = false;
+    const pfp = portrait('aoe-friend__pfp', friend.pfp);
 
     const name = document.createElement('div');
     name.className = 'aoe-friend__name';

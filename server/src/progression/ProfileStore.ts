@@ -74,6 +74,7 @@ class ProfileStore {
       ownedTrails: player.ownedTrails,
       trailSlot: player.trailSlot,
       bestStage: player.bestStage,
+      displayName: player.accountName,
       updatedAt: Date.now(),
     });
     this.adapter.save(this.profiles);

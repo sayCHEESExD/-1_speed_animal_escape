@@ -1,10 +1,9 @@
 import {
-  STAND_ROW,
   animalForSlot,
   ownsAnimal,
-  standZ,
   winPadAt,
   type WorldCollision,
+  standSlotAt,
 } from '@animal/shared';
 import type { LocalPlayer } from '../player/LocalPlayer.js';
 
@@ -103,13 +102,7 @@ export class RunController {
    * different bounds would ask for animals the server refuses.
    */
   private standAt(x: number, y: number, z: number): number | null {
-    if (Math.abs(x - STAND_ROW.x) > STAND_ROW.claimRadius) return null;
     if (y < -1 || y > 4) return null;
-    for (let slot = 1; slot <= 32; slot += 1) {
-      const animal = animalForSlot(slot);
-      if (animal.slot !== slot) break;
-      if (Math.abs(z - standZ(slot)) <= STAND_ROW.claimRadius) return slot;
-    }
-    return null;
+    return standSlotAt(x, z);
   }
 }

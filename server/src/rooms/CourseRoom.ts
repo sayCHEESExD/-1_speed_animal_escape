@@ -31,6 +31,12 @@ import { ElephantService } from '../world/ElephantService.js';
 import { logger } from '../util/logger.js';
 import { CourseState } from './state/CourseState.js';
 import { PlayerState } from './state/PlayerState.js';
+import {
+  handleFor,
+  sanitizeDisplayName,
+  sanitizePfpUrl,
+  type SetIdentityMessage,
+} from '@animal/shared';
 
 const SCOPE = 'CourseRoom';
 
@@ -40,7 +46,10 @@ const AUTOSAVE_SECONDS = 15;
 /** Options a client may pass on join. Both are cosmetic or identity only. */
 interface JoinOptions {
   playerId?: string;
+  /** The player's Bloxity display name. Public text only - never the account id. */
   name?: string;
+  /** Their Bloxity portrait URL. Pinned to Bloxity's image host on arrival. */
+  pfp?: string;
   /** The Bloxity account id, when the player is signed in to the portal. */
   bloxityId?: string;
 }
@@ -114,6 +123,15 @@ export class CourseRoom extends Room<CourseState> {
     this.onMessage(MessageType.BuyTrail, (client, message: BuyTrailMessage) =>
       this.onBuyTrail(client, message),
     );
+<<<<<<< Updated upstream
+=======
+    this.onMessage(MessageType.SetAvatar, (client, message: SetAvatarMessage) =>
+      this.onSetAvatar(client, message),
+    );
+    this.onMessage(MessageType.SetIdentity, (client, message: SetIdentityMessage) =>
+      this.onSetIdentity(client, message),
+    );
+>>>>>>> Stashed changes
     this.onMessage(MessageType.EquipTrail, (client, message: EquipTrailMessage) =>
       this.onEquipTrail(client, message),
     );
@@ -183,6 +201,14 @@ export class CourseRoom extends Room<CourseState> {
       // Anything bought while they were away, or in another session.
       this.applyGrants(client.sessionId, player);
     }
+<<<<<<< Updated upstream
+=======
+    if (options.avatar) this.writeAvatar(player, options.avatar);
+    // Always written, even for a player who sent nothing: that is what gives a
+    // signed-out rider their derived handle rather than a blank nameplate.
+    this.writeIdentity(client.sessionId, player, { name: options.name, pfp: options.pfp });
+
+>>>>>>> Stashed changes
     this.rebirths.sync(player);
 
     // `initialise` reset the level to 1 for a fresh profile; a restored one
@@ -340,6 +366,73 @@ export class CourseRoom extends Room<CourseState> {
   }
 
   /**
+<<<<<<< Updated upstream
+=======
+   * "This is what I look like."
+   *
+   * Accepted rather than adjudicated, which is the opposite of every other
+   * client message here and is safe for one reason: the payload decides
+   * nothing. The portal owns a player's appearance and this server has no way
+   * to ask it, so the client is the only source of the truth - and the worst a
+   * forged one achieves is wearing a hat it did not buy, on its own screen and
+   * everyone else's. It is NOT persisted: the appearance lives in the player's
+   * Bloxity account, and a copy in the profile would be a second one to keep
+   * in step with the first.
+   */
+  private onSetAvatar(client: Client, message: SetAvatarMessage): void {
+    const player = this.state.players.get(client.sessionId);
+    if (!player) return;
+    this.writeAvatar(player, message);
+  }
+
+  /** Sanitise, then write in place. The one path an appearance is set by. */
+  private writeAvatar(player: PlayerState, message: SetAvatarMessage): void {
+    player.avatar.apply(
+      sanitizeAppearance(message?.appearance),
+      sanitizeProportions(message?.proportions),
+    );
+  }
+
+  /**
+   * "This is who I am in the portal."
+   *
+   * Accepted on the same terms as `SetAvatar`, and for the same reason: it
+   * decides nothing. The server cannot ask Bloxity who a socket belongs to, so
+   * the client is the only source - and a forged name buys a label on a sign,
+   * never a Win. Sent again on login, logout and a new portrait.
+   */
+  private onSetIdentity(client: Client, message: SetIdentityMessage): void {
+    const player = this.state.players.get(client.sessionId);
+    if (!player) return;
+    this.writeIdentity(client.sessionId, player, message);
+  }
+
+  /**
+   * Sanitise a name and portrait, and decide what everyone is shown.
+   *
+   * The ONE path either field is set by. A missing or unusable name falls back
+   * to the handle derived from the player's id, so the fallback for signed-out
+   * players is the rule the boards already used - and the id itself still
+   * never leaves the server.
+   */
+  private writeIdentity(
+    sessionId: string,
+    player: PlayerState,
+    message: Partial<SetIdentityMessage> | undefined,
+  ): void {
+    const name = sanitizeDisplayName(message?.name);
+    const pfp = sanitizePfpUrl(message?.pfp);
+    const shown = name || handleFor(this.playerIds.get(sessionId) ?? '');
+
+    player.accountName = name;
+    // Assigned only on a real change: an identical write still counts as a
+    // change to the schema encoder, and a re-sent identity is common.
+    if (player.displayName !== shown) player.displayName = shown;
+    if (player.pfp !== pfp) player.pfp = pfp;
+  }
+
+  /**
+>>>>>>> Stashed changes
    * The per-tick pass the client cannot influence.
    *
    * Deaths are decided HERE, from the position the server simulated and the

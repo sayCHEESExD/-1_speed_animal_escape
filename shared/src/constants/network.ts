@@ -64,6 +64,25 @@ export const MessageType = {
   BuyTrail: 'buyTrail',
   /** Client -> server: wear an OWNED trail, or 0 to take it off. */
   EquipTrail: 'equipTrail',
+<<<<<<< Updated upstream
+=======
+  /**
+   * Client -> server: "this is what my Bloxity avatar looks like".
+   *
+   * The one message whose content the server stores rather than judges, and it
+   * can be because it decides nothing: the portal owns a player's appearance
+   * and the server has no way to ask it, so the client is the only source
+   * there is. It is sanitised on arrival and it never touches progression.
+   */
+  SetAvatar: 'setAvatar',
+  /**
+   * Client -> server: "this is my portal name and portrait".
+   *
+   * Cosmetic in exactly the way `SetAvatar` is: sanitised on arrival, drawn on
+   * nameplates and boards, and read by nothing that decides an outcome.
+   */
+  SetIdentity: 'setIdentity',
+>>>>>>> Stashed changes
 } as const;
 
 export type MessageType = (typeof MessageType)[keyof typeof MessageType];

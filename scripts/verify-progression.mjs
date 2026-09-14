@@ -11,6 +11,9 @@
  */
 import {
   ANIMALS,
+  COURSE,
+  DISPLAY_NAME_MAX,
+  MAX_WINS,
   STAGES,
   STAND_ROW,
   TRAIL_TIERS,
@@ -19,6 +22,12 @@ import {
   resolveLevel,
   resolveMovementProfile,
   standZ,
+  bestOwnedAnimal,
+  ownsAnimal,
+  sanitizeDisplayName,
+  sanitizePfpUrl,
+  standSlotAt,
+  standX,
 } from '../shared/dist/index.js';
 import { StageService } from '../server/dist/progression/StageService.js';
 import { AnimalService } from '../server/dist/progression/AnimalService.js';
@@ -195,7 +204,7 @@ console.log('animal claiming');
 
   // At the stand, but broke. The line-up is a COLUMN down the left wall, so
   // the fixed axis is X and the per-slot axis is Z.
-  player.x = STAND_ROW.x;
+  player.x = standX(llama.slot);
   player.y = 0;
   player.z = standZ(llama.slot);
   check('claim with no Wins is refused', animals.claim(player, llama.slot, speeds).reason, 'too-poor');
@@ -209,7 +218,7 @@ console.log('animal claiming');
   check('  Wins not deducted', player.wins, 500);
 
   // Rich and in the right place.
-  player.x = STAND_ROW.x;
+  player.x = standX(llama.slot);
   player.z = standZ(llama.slot);
   const bought = animals.claim(player, llama.slot, speeds);
   check('claim at the stand with Wins is granted', bought.granted, true);
@@ -229,6 +238,79 @@ console.log('animal claiming');
   animals.claim(player, 1, speeds);
   check('claiming the starter again does not downgrade', player.animalSlot, llama.slot);
   check('  and costs nothing', player.wins, winsBefore);
+}
+
+console.log('premium animals');
+{
+  const speeds = new SpeedService();
+  const animals = new AnimalService();
+  const player = newPlayer(speeds, animals);
+  const starterMultiplier = player.moveMultiplier;
+
+  const dragon = animalForSlot(10);
+  const premium = ANIMALS.filter((a) => a.slot > dragon.slot);
+  check('several animals above the dragon', premium.length >= 4, true);
+  check('every one costs more than 5M Wins', premium.every((a) => a.winsRequired > 5_000_000), true);
+
+  let ladder = true;
+  let previous = dragon;
+  for (const animal of premium) {
+    if (!(animal.winsRequired > previous.winsRequired)) ladder = false;
+    if (!(animal.speedPerStep > previous.speedPerStep)) ladder = false;
+    if (!(animal.moveBonus > previous.moveBonus)) ladder = false;
+    previous = animal;
+  }
+  check('each costs more, strides further and runs faster than the last', ladder, true);
+  check('every price fits the uint32 Wins field', ANIMALS.every((a) => a.winsRequired <= MAX_WINS), true);
+  check('every slot fits the uint32 owned mask', ANIMALS.every((a) => a.slot >= 1 && a.slot <= 31), true);
+  check('slots are contiguous from 1', ANIMALS.every((a, i) => a.slot === i + 1), true);
+
+  // Every stand inside the arena, and each one's own centre claims its own slot
+  // - which also proves no two footprints overlap.
+  let placed = true;
+  for (const animal of ANIMALS) {
+    const x = standX(animal.slot);
+    const z = standZ(animal.slot);
+    if (Math.abs(x) + STAND_ROW.width / 2 > COURSE.lobbyHalfWidth) placed = false;
+    if (z - STAND_ROW.length / 2 < COURSE.lobbyStartZ) placed = false;
+    if (z + STAND_ROW.length / 2 > COURSE.lobbyEndZ) placed = false;
+    if (standSlotAt(x, z) !== animal.slot) placed = false;
+  }
+  check('every stand is inside the arena and claims its own slot', placed, true);
+  check('neighbouring claim squares never overlap', STAND_ROW.claimRadius * 2 <= STAND_ROW.spacingZ, true);
+  check('every plinth leaves a gap to its neighbour', STAND_ROW.length < STAND_ROW.spacingZ, true);
+
+  const top = premium[premium.length - 1];
+  player.wins = top.winsRequired - 1;
+  player.x = standX(top.slot);
+  player.y = 0;
+  player.z = standZ(top.slot);
+  check(`the ${top.name} one Win short is refused`, animals.claim(player, top.slot, speeds).reason, 'too-poor');
+
+  player.wins = top.winsRequired;
+  const bought = animals.claim(player, top.slot, speeds);
+  check(`the ${top.name} at its stand with the Wins is granted`, bought.granted, true);
+  check('  exact price deducted', player.wins, 0);
+  check('  now equipped', player.animalSlot, top.slot);
+  check('  Speed per stride follows it', player.speedPerStep, top.speedPerStep);
+  check('  movement is faster than on the starter', player.moveMultiplier > starterMultiplier, true);
+  check('  owned in the mask', ownsAnimal(player.ownedAnimals, top.slot), true);
+  // What a save round-trips is the mask; the equipped animal is re-derived
+  // from it on load, so this is the persistence guarantee.
+  check('  a saved mask restores it as the best owned', bestOwnedAnimal(player.ownedAnimals).slot, top.slot);
+}
+
+console.log('identity');
+{
+  check('a plain username survives', sanitizeDisplayName('chicken456'), 'chicken456');
+  check('markup is stripped from a name', sanitizeDisplayName('<b>x</b>'), 'bxb');
+  check('names are bounded', Array.from(sanitizeDisplayName('a'.repeat(80))).length, DISPLAY_NAME_MAX);
+  check('a non-string name is empty', sanitizeDisplayName(42), '');
+  const portrait = 'https://static.bloxity.io/img/pfps/s0.png?width=128&quality=85&v=2';
+  check('a Bloxity portrait is kept', sanitizePfpUrl(portrait), portrait);
+  check('another host is refused', sanitizePfpUrl('https://example.com/a.png'), '');
+  check('a look-alike host is refused', sanitizePfpUrl('https://static.bloxity.io.example.com/a.png'), '');
+  check('a quote in a portrait URL is refused', sanitizePfpUrl('https://static.bloxity.io/a".png'), '');
 }
 
 console.log('speed and levels');

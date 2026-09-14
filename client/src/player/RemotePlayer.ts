@@ -49,6 +49,27 @@ export class RemotePlayer {
 
   private placed = false;
 
+<<<<<<< Updated upstream
+=======
+  /** The replicated name and portrait, read by the nameplates. Cosmetic only. */
+  displayName = '';
+  pfp = '';
+
+  /**
+   * This player's Bloxity appearance, built from replicated ids.
+   *
+   * Remote riders used to keep the bundled character on the grounds that
+   * fetching somebody else's cosmetics was a lot of traffic for something
+   * glimpsed in passing. That is no longer the trade: the ids arrive as part
+   * of the patch that was coming anyway, and every asset behind them is cached
+   * by URL, so a lobby of ten players in the same starter skin fetches it
+   * once.
+   */
+  private readonly dresser: AvatarDresser;
+  /** The look last applied, so an unchanged patch does nothing. */
+  private lastLook = '';
+
+>>>>>>> Stashed changes
   constructor(state: NetPlayerState) {
     this.mount = new Mount(state.animalSlot);
     this.apply(state);
@@ -80,6 +101,12 @@ export class RemotePlayer {
 
     this.mount.setAnimalSlot(state.animalSlot);
     this.mount.setTrailSlot(state.trailSlot);
+<<<<<<< Updated upstream
+=======
+    this.dressFrom(state);
+    this.displayName = state.displayName ?? '';
+    this.pfp = state.pfp ?? '';
+>>>>>>> Stashed changes
 
     if (this.lastDeathCount >= 0 && state.deathCount > this.lastDeathCount) {
       this.deathTime = 0;

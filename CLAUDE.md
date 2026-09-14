@@ -255,6 +255,14 @@ engine. Do not add a framework or a build tool without a concrete need.
   seven hundred.
 - Markings are a fixed lattice, never a random scatter: every client must draw
   the same deer.
+- **Fifteen animals.** Slots 11-15 are the prestige tier (Frost Wolf, Golden
+  Stag, Shadow Pegasus, Crystal Unicorn, Celestial Dragon), priced from 10M to
+  1.5B Wins against the late course - stage 30 pays 5M a clear - rather than
+  against the dragon. They are palettes and existing features on the same
+  builder: no new modelling code and no new mechanic.
+- Two hard ceilings on the roster: a price must fit `MAX_WINS` (the uint32 Wins
+  field) and a slot must be at most 31, because `animalBit(32)` is `1 << 31`,
+  which is NEGATIVE in JavaScript. `verify-progression` checks both.
 
 ## Animation
 
@@ -404,7 +412,8 @@ Procedural, and required for the finished game - not a placeholder.
 
 The HUD is: **Wins** upper centre, **Rebirth**, **Trails** and **Sound** down
 the left rail, and **Speed** and **Level** along the bottom. The Speed-gain
-popups float over the middle. Nothing else yet.
+popups float over the middle, and a small **nameplate** - portrait and name -
+floats over every rider's head.
 
 - `hudStyles.ts` owns the one stylesheet and the inline SVG icons, so the rail,
   the win counter and both panels cannot drift apart visually.
@@ -429,6 +438,21 @@ popups float over the middle. Nothing else yet.
   A placement that lands on one still on screen is re-rolled.
 - `run.png` is used at its real aspect ratio: the CSS drives the icon's HEIGHT
   and leaves the width automatic. Setting both is how an icon gets squashed.
+- **Nameplates are DOM, projected after the render.** Text and a portrait are
+  what the browser already draws crisply, and projecting from the matrices the
+  render just computed is what keeps a plate on a mount doing four hundred
+  units a second - before the render it would trail a frame behind. Every
+  write is compared first and nothing reads layout per frame: the viewport size
+  arrives on resize. They sit BELOW all HUD (z-index 18), hang over the rider's
+  `Neck1` so they follow proportions and saddle height, and hide past 120 units.
+- **A phone on its side** is `(orientation: landscape) and (max-height: 500px)`,
+  and every rule for it is scoped to that query so desktop and portrait are
+  untouched. The rail was centred vertically, which on a 360px-tall screen put
+  the Sound tile ON the movement stick, so it climbs to the top-left and sizes
+  by height; the Speed bar was lifted 96px clear of the thumbs, which put it
+  across the rider, so it returns to the bottom edge and narrows to the gap
+  between the stick and jump button, measured from the same vmin they are.
+  Safe-area insets are applied there too: in landscape the notch is on a side.
 - **Every menu must be reachable with a mouse.** Pointer lock hides the cursor,
   every panel opens from a rail tile, and a button you can neither see nor
   click is not a menu - so `MouseLook.cursorFree` is a real state: Escape hands
@@ -463,10 +487,12 @@ was deliberately left empty for. It stays the only thing there.
 - The replicated arrays are FIXED-LENGTH and written in place. Clearing and
   refilling nine rows every rebuild would send the whole board to every client
   whether or not a place had moved.
-- Players have no names: a handle is DERIVED from the player's id by
-  `handleFor`, deterministically, so the same player is the same name on every
-  board with nothing stored and nothing for a client to assert. The id itself
-  never leaves the server.
+- A row shows the player's **Bloxity name** when they are signed in, and
+  otherwise the handle `handleFor` DERIVES from their id - so a standalone
+  player still has a stable name and the id itself never leaves the server.
+- The board is keyed by PLAYER ID, never by the name shown. Names are the
+  player's own now, two riders can share one, and a map keyed by the label
+  would silently merge them into a single row.
 - Panel text is fitted the same way world signs are. A long handle shrinks; the
   figure beside it never gets pushed off the board.
 
@@ -575,6 +601,7 @@ script in `index.html`, BEFORE the module bundle.
 - A purchase is made by the ACCOUNT, not the browser. The client sends its
   Bloxity id as a join option alongside the browser-stored `playerId`; they are
   different identities and the grant is addressed to the account.
+<<<<<<< Updated upstream
 - **Cosmetics are applied to the LOCAL rider only** - skin texture, hat, back
   item and proportions. Remote riders keep the shared default material.
 - **The body-part slots are deliberately NOT worn.** Head, torso, arms and legs
@@ -582,6 +609,65 @@ script in `index.html`, BEFORE the module bundle.
   project's canonical player asset with the rig the whole animation system is
   bound to. Swapping it at runtime is a second player asset by another name.
   The ids are read and logged so the data is visibly arriving.
+=======
+- **A player is drawn as their real Bloxity avatar, local and remote alike.**
+  The two rigs turned out to be THE SAME RIG: Bloxity's `player.glb` carries
+  the twelve bone names `PlayerRig` binds, so it is a drop-in body - it even
+  measures the same 3.2 units. That is what makes this possible at all, and
+  why the earlier rule against wearing body parts no longer holds.
+- The body is `player.glb` and the PARTS are geometry swapped onto its
+  skeleton, which is what Bloxity's own renderer does and the only thing a part
+  mesh means: it is authored against that one shared rig. Swapping needs the
+  `skinIndex` values retargeted BY BONE NAME, because each part ships its own
+  copy of the rig in its own joint order.
+- **The bundled `player.fbx` remains the fallback**, and it is reached by three
+  different roads that all mean the same thing: signed out, an item the
+  catalogue does not know, or an asset that would not load. It is also what is
+  on screen while a Bloxity body is still downloading - a rider is never
+  nothing.
+- **No asset URL is built from an id.** `GET /v1/avatar/items/{id}` hands back
+  an `assetPaths` object and those paths are used verbatim, so an item Bloxity
+  moves keeps working. The only literal path is the base body's, which has no
+  catalogue entry; the SDK loads it by literal too.
+- `AvatarDresser` is the ONE thing that decides which body a rider has, and it
+  is shared by the local player and every remote one - a player who looked one
+  way on their own screen and another way on everyone else's is exactly the bug
+  two code paths would produce. A body is rebuilt only when a body PART
+  changes: a hat, a skin or a proportion applies to whatever body is mounted.
+- The appearance is the ONE replicated field that originates with a client, and
+  that is safe because it decides nothing - it chooses meshes and a texture. It
+  is sanitised on arrival, never persisted, and read by no service. Nothing
+  private goes with it: ids only, never the account.
+- **`forceHeadId` is a head REPLACEMENT, not a hiding flag** - the name invites
+  the wrong reading. Bloxity's customiser applies it as
+  `equipped.headId = hat.forceHeadId` when the hat is equipped, and its
+  renderer treats a head of `'-1'` as "put the stock head back" rather than as
+  "draw no head". All three hats that declare it today declare `'-1'`, meaning
+  the helmet is modelled around the default head and a custom one would poke
+  through. `AvatarDresser.forceHead` applies it again at render time, because a
+  look can reach this game from a join option or from replicated state rather
+  than from the customiser that enforced it.
+- **The name and portrait are the second replicated field a client supplies**,
+  on the same terms as the appearance: `SetIdentity` on join and on every login,
+  logout or new portrait, sanitised on arrival, deciding nothing. The server
+  always fills `displayName` - the Bloxity name, or the derived handle - so no
+  plate is blank. Only the Bloxity name is persisted (`accountName`, which is
+  deliberately NOT a schema field), so the board can name someone offline.
+- A Bloxity GUEST is signed out for naming purposes: the SDK gives a guest a
+  random local nickname, which is not an identity. Their portrait is kept - the
+  SDK renders it from the avatar they are wearing.
+- A portrait URL is pinned to `https://static.bloxity.io/` - every `pfp` the
+  SDK builds lives there - because it is replicated into an image element on
+  every screen in the room, and an open URL would let any player make the whole
+  room fetch an address of their choosing. The trailing slash is load-bearing.
+- The name is the client's word: the server has no verified way to ask Bloxity
+  who a socket is. A forged name buys a label on a sign and never a Win, which
+  is the same trade the appearance already makes.
+- A nested Colyseus schema does NOT bubble its changes to its parent, so
+  `avatar` needs its own `onChange`. Without one a player who re-dressed
+  mid-run kept their old body on every other screen until they happened to
+  touch a field on `PlayerState` itself.
+>>>>>>> Stashed changes
 - Proportions are written as SCALE and POSITION on bones, never rotation:
   `PlayerRig` rebuilds every bone's quaternion from its rest pose every frame,
   so a rotation written there would be gone before it was drawn.
@@ -607,8 +693,20 @@ harness has to re-assert them each frame.
 ## World layout
 
 - A large starting arena (116 x 112): the animal line-up down the player's LEFT
-  wall, open ground through the middle, the training deck on the RIGHT, and a
-  deliberately EMPTY back wall. The back stays clean; it is not a third feature
+  side, open ground through the middle, the training deck on the RIGHT, and a
+  deliberately EMPTY back wall.
+- The stands are ONE column down the left wall, and the spacing is DERIVED
+  from the roster: the column runs from z -100 to -7 and every animal gets an
+  equal share, so a new animal tightens the line-up rather than standing on
+  stage one. The plinth and the claim radius follow the spacing, and the claim
+  radius never exceeds half of it, so two claim squares cannot overlap.
+  Alternate price signs stand a sign's height higher, because a line-up tighter
+  than a sign is wide would otherwise run neighbouring signs together.
+- A SECOND column was tried first and rejected: seen from the middle of the
+  arena, its price signs sat directly over the wall column's and made five of
+  them unreadable. Signs are what a shop is for.
+- `standSlotAt` is the ONE footprint test - the server that charges and the
+  client that asks both call it, where each used to carry its own loop. The back stays clean; it is not a third feature
   area.
 - The three treadmills are IDENTICAL and stand in a row along Z on the training
   deck, with their belts running along X and their consoles at the +X end - so

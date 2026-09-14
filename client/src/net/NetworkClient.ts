@@ -5,6 +5,11 @@ import {
   type ClaimStageMessage,
   type MoveMessage,
   type RespawnMessage,
+<<<<<<< Updated upstream
+=======
+  type SetAvatarMessage,
+  type SetIdentityMessage,
+>>>>>>> Stashed changes
   type StageAwardedMessage,
 } from '@animal/shared';
 import { Client, getStateCallbacks, type Room } from 'colyseus.js';
@@ -101,6 +106,8 @@ export class NetworkClient {
    * still imports nothing from the portal layer.
    */
   private identity: (() => string | null) | null = null;
+  /** The public name and portrait to join with. Null for none. */
+  private profile: (() => SetIdentityMessage | null) | null = null;
 
   constructor(handlers: NetworkHandlers = {}) {
     this.handlers = handlers;
@@ -109,6 +116,21 @@ export class NetworkClient {
   /** Where the room should get the Bloxity account id from, if there is one. */
   setIdentityProvider(provider: () => string | null): void {
     this.identity = provider;
+  }
+
+  /** Where the room should get the player's public name and portrait from. */
+  setProfileProvider(provider: () => SetIdentityMessage | null): void {
+    this.profile = provider;
+  }
+
+  /**
+   * Tell the room this player's portal name and portrait changed.
+   *
+   * Cosmetic, like `sendAvatar`: the server sanitises it, falls back to a
+   * derived handle when it is empty, and never lets it decide anything.
+   */
+  sendIdentity(message: SetIdentityMessage): void {
+    this.room?.send(MessageType.SetIdentity, message);
   }
 
   get sessionId(): string | null {
@@ -162,11 +184,23 @@ export class NetworkClient {
 
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
       try {
+        const profile = this.profile?.() ?? null;
         this.room = await this.client.joinOrCreate<NetCourseState>(ROOM_NAME, {
           playerId,
           // Optional: a signed-out player simply has none, and the room falls
           // back to the browser-stored id exactly as it always did.
           bloxityId: this.identity?.() ?? undefined,
+<<<<<<< Updated upstream
+=======
+          // Sent with the join rather than after it, so players already in the
+          // room draw this one correctly from their very first patch.
+          avatar: this.look?.() ?? undefined,
+          // The public name and portrait, with the join for the same reason
+          // the look is. Absent for a signed-out player, who is then shown
+          // under the handle the server derives for them.
+          name: profile?.name || undefined,
+          pfp: profile?.pfp || undefined,
+>>>>>>> Stashed changes
         });
         break;
       } catch (error) {

@@ -1,3 +1,4 @@
+import { sanitizeDisplayName } from '@animal/shared';
 import {
   closeSync,
   existsSync,
@@ -77,6 +78,9 @@ export class JsonFilePersistence implements PersistenceAdapter {
           ownedTrails: numeric(value.ownedTrails),
           trailSlot: numeric(value.trailSlot),
           bestStage: numeric(value.bestStage),
+          // Absent from every profile written before names were kept, which is
+          // exactly what an empty name means: the board falls back to the handle.
+          displayName: sanitizeDisplayName(value.displayName),
           updatedAt: numeric(value.updatedAt),
         });
       }

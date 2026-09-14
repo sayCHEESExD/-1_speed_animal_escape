@@ -433,6 +433,20 @@ const injectStyles = (): void => {
   -webkit-tap-highlight-color: transparent;
 }
 .aoe-touch__jump--down { transform: translateY(4px); box-shadow: none; filter: brightness(1.12); }
+
+/*
+ * A phone on its side: the notch is on one of the SIDES, which is exactly where
+ * the stick and the jump button live, so the insets become real here instead of
+ * the zero they fall back to. Scoped to landscape so portrait is untouched.
+ */
+@media (orientation: landscape) and (max-height: 500px) {
+  .aoe-touch {
+    --aoe-safe-l: env(safe-area-inset-left, 0px);
+    --aoe-safe-r: env(safe-area-inset-right, 0px);
+    --aoe-safe-b: env(safe-area-inset-bottom, 0px);
+  }
+  .aoe-touch__jump { bottom: calc(var(--aoe-safe-b, 0px) + 20px); }
+}
 `;
   document.head.append(style);
 };

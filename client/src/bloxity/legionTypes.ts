@@ -19,6 +19,11 @@ export interface LegionUser {
   readonly email?: string;
   readonly pfp?: string;
   readonly avatar?: string;
+  /**
+   * Set on the stand-in user the SDK builds for a visitor who has not signed
+   * in: a random local nickname and a portrait rendered from their avatar.
+   */
+  readonly isGuest?: boolean;
 }
 
 /**
