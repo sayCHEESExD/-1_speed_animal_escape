@@ -42,6 +42,11 @@ export class RemotePlayerManager {
     this.players.delete(sessionId);
   }
 
+  /** Every remote by session id, for the per-frame nameplate pass. */
+  entries(): IterableIterator<[string, RemotePlayer]> {
+    return this.players.entries();
+  }
+
   advance(delta: number): void {
     for (const player of this.players.values()) player.update(delta);
   }

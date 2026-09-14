@@ -73,6 +73,13 @@ export const MessageType = {
    * there is. It is sanitised on arrival and it never touches progression.
    */
   SetAvatar: 'setAvatar',
+  /**
+   * Client -> server: "this is my portal name and portrait".
+   *
+   * Cosmetic in exactly the way `SetAvatar` is: sanitised on arrival, drawn on
+   * nameplates and boards, and read by nothing that decides an outcome.
+   */
+  SetIdentity: 'setIdentity',
 } as const;
 
 export type MessageType = (typeof MessageType)[keyof typeof MessageType];

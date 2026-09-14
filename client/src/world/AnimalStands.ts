@@ -1,4 +1,4 @@
-import { ANIMALS, COURSE, STAND_ROW, formatSpeed, standZ } from '@animal/shared';
+import { ANIMALS, COURSE, STAND_ROW, formatSpeed, standX, standZ } from '@animal/shared';
 import { Group, Mesh, MeshLambertMaterial } from 'three';
 import { AnimalModel } from '../animal/AnimalModel.js';
 import { PALETTE } from '../config/worldVisuals.js';
@@ -7,6 +7,17 @@ import { texturedBox } from './texturedBox.js';
 
 /** How fast a display animal turns on its plinth, in radians per second. */
 const TURN_RATE = 0.5;
+
+/**
+ * How much higher every other price sign stands.
+ *
+ * A little more than a sign's own 3.1-unit height. The line-up is spaced more
+ * tightly than a sign is wide, so neighbours at one height would run into each
+ * other; staggered, the nearest sign at the SAME height is two stands away.
+ * Nothing about the text changes - shrinking it would be the symptom treated
+ * as the cure.
+ */
+const SIGN_STAGGER = 3.4;
 
 /** One stand: a plinth, the animal standing on it, and its price label. */
 interface Stand {
@@ -54,7 +65,7 @@ export class AnimalStands {
       // A COLUMN down the left wall: the arena is far deeper than it is wide,
       // and a row across it would have cut through the open middle the room
       // exists to provide.
-      group.position.set(STAND_ROW.x, COURSE.floorY, standZ(animal.slot));
+      group.position.set(standX(animal.slot), COURSE.floorY, standZ(animal.slot));
 
       const base = new Mesh(plinth, this.baseMaterial);
       base.position.y = STAND_ROW.height / 2;
@@ -91,7 +102,8 @@ export class AnimalStands {
           stroke: '#40320c',
         },
       ]);
-      sign.mesh.position.set(0, STAND_ROW.height + model.height + 1.5, 0);
+      const lift = animal.slot % 2 === 0 ? SIGN_STAGGER : 0;
+      sign.mesh.position.set(0, STAND_ROW.height + model.height + 1.5 + lift, 0);
       sign.mesh.rotation.y = -Math.PI / 2;
       group.add(sign.mesh);
 

@@ -81,6 +81,28 @@ export class PlayerState extends Schema {
    */
   @type(AvatarState) avatar = new AvatarState();
 
+  /**
+   * The name drawn over this player's head and on the boards.
+   *
+   * Always filled in by the SERVER: the player's Bloxity name when they sent
+   * one, and otherwise the handle derived from their id - so no nameplate is
+   * ever blank and no id ever reaches a client. Like `avatar`, it is sanitised
+   * on arrival, cosmetic, and read by nothing that decides an outcome.
+   */
+  @type('string') displayName = '';
+  /** Their Bloxity portrait, pinned to Bloxity's own image host. '' for none. */
+  @type('string') pfp = '';
+
+  /**
+   * The Bloxity name alone, WITHOUT the fallback handle.
+   *
+   * Deliberately NOT decorated, so it is never replicated. It is what gets
+   * persisted: a stored profile keeps a real name for the boards, while a
+   * handle is re-derived from the id on every read - storing one would only be
+   * a copy that could drift from the rule that makes it.
+   */
+  accountName = '';
+
   /** Server-authoritative progression. */
   @type('uint32') level = 1;
   /**

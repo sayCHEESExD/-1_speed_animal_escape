@@ -53,6 +53,14 @@ export interface NetPlayerState extends PlayerMotionState {
    * `shared/src/types/avatar.ts`.
    */
   avatar: AvatarAppearance & AvatarProportions;
+
+  /**
+   * The name on this player's nameplate and board rows: their Bloxity name, or
+   * the handle the server derived for a signed-out player. Never an id.
+   */
+  displayName: string;
+  /** Their Bloxity portrait URL, or '' for none. */
+  pfp: string;
 }
 
 /** The replicated elephant. The one hazard that is state, not a formula. */

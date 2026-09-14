@@ -1,4 +1,5 @@
 import type { Aabb } from '../types/math.js';
+import { ANIMALS } from './animals.js';
 import { totalSpeedToReach } from './speed.js';
 
 /**
@@ -621,22 +622,67 @@ solids.push({
  * is wide, and a row would have run straight across the middle of the space
  * the players are meant to gather in.
  */
+/** Centre Z of the first stand, near the back wall. */
+const STAND_FIRST_Z = -100;
+/** Centre Z of the last stand, just short of the stage entrance at z 0. */
+const STAND_LAST_Z = -7;
+/**
+ * Distance between neighbouring stands, DERIVED from the roster.
+ *
+ * Every animal gets an equal share of one fixed run down the wall, so adding an
+ * animal tightens the line-up instead of pushing a stand out onto stage one. A
+ * second column was tried first and rejected: seen from the middle of the
+ * arena its price signs sat directly over the wall column's and made five of
+ * them unreadable. `AnimalStands` staggers alternate signs vertically so the
+ * tighter spacing never runs two neighbours together.
+ */
+const STAND_SPACING = (STAND_LAST_Z - STAND_FIRST_Z) / Math.max(1, ANIMALS.length - 1);
+
 export const STAND_ROW = {
   /** X of every stand. */
   x: 44,
   /** Z of the first stand, and the spacing down the wall. */
-  firstZ: -96,
-  spacingZ: 9.5,
-  width: 6.5,
-  length: 6.5,
+  firstZ: STAND_FIRST_Z,
+  spacingZ: STAND_SPACING,
+  /** Plinth footprint: the authored 6.5, or less when the spacing needs a visible gap. */
+  width: Math.min(6.5, STAND_SPACING - 0.7),
+  length: Math.min(6.5, STAND_SPACING - 0.7),
   height: 0.6,
-  /** How close the player must be to claim. */
-  claimRadius: 3.6,
+  /**
+   * How close the player must be to claim.
+   *
+   * Never more than half the spacing, so two stands' claim squares cannot
+   * overlap and a mount parked on one plinth can never be charged for its
+   * neighbour.
+   */
+  claimRadius: Math.min(3.6, STAND_SPACING / 2 - 0.05),
 } as const;
 
-/** Centre of the stand for a 1-based animal slot. */
+/** Centre X of the stand for a 1-based animal slot. Every stand shares the wall's X. */
+export const standX = (_slot: number): number => STAND_ROW.x;
+
+/** Centre Z of the stand for a 1-based animal slot. */
 export const standZ = (slot: number): number =>
   STAND_ROW.firstZ + (Math.floor(slot) - 1) * STAND_ROW.spacingZ;
+
+/**
+ * The stand a point is on, judged by footprint alone, or null.
+ *
+ * ONE definition, read by the server that takes the payment and by the client
+ * that asks for it. Each used to carry its own copy of this loop, and any change
+ * to the line-up is exactly what would have left one of them behind.
+ */
+export const standSlotAt = (x: number, z: number): number | null => {
+  for (const animal of ANIMALS) {
+    if (
+      Math.abs(x - standX(animal.slot)) <= STAND_ROW.claimRadius &&
+      Math.abs(z - standZ(animal.slot)) <= STAND_ROW.claimRadius
+    ) {
+      return animal.slot;
+    }
+  }
+  return null;
+};
 
 /**
  * The training deck, on the RIGHT of the arena.
@@ -743,12 +789,13 @@ for (let i = 1; i <= TRAINING.count; i += 1) {
   );
 }
 
-// The animal stands.
-for (let slot = 1; slot <= 10; slot += 1) {
+// The animal stands: one per animal in the roster. Driven by the roster rather
+// than a count, so a new animal is solid ground the moment it exists.
+for (const { slot } of ANIMALS) {
   pushBox(
     -1,
     'stand',
-    STAND_ROW.x,
+    standX(slot),
     COURSE.floorY,
     standZ(slot),
     STAND_ROW.width,

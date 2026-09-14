@@ -6,6 +6,8 @@ import {
 import { AudioManager } from '../audio/AudioManager.js';
 import { Bloxity } from '../bloxity/Bloxity.js';
 import { AvatarDresser } from '../bloxity/AvatarDresser.js';
+import { identityFromLegion } from '../bloxity/identity.js';
+import { Nameplates } from '../ui/Nameplates.js';
 import { lookFromLegion } from '../bloxity/avatarLook.js';
 import { PlayerAudio } from '../audio/PlayerAudio.js';
 import { Vector3 } from 'three';
@@ -93,6 +95,8 @@ export class Game {
   private readonly pops: SpeedPopups;
   private readonly wins: WinsCounter;
   private readonly winFlight: WinFlight;
+  /** Name chips over every rider, positioned after each render. */
+  private readonly nameplates: Nameplates;
   private readonly rail: HTMLDivElement;
   private readonly rebirthButton: RailButton;
   private readonly trailButton: RailButton;
@@ -138,6 +142,12 @@ export class Game {
   /** Last replicated owned-animal mask, so the stands only relight on change. */
   private lastOwnedAnimals = -1;
 
+  /** The local player's name and portrait AS THE SERVER REPLICATED THEM. */
+  private localName = '';
+  private localPfp = '';
+  /** The identity last sent, so an unchanged login event sends nothing. */
+  private lastIdentity = '';
+
   constructor(container: HTMLElement) {
     injectHudStyles();
     this.renderer = new RendererManager(container);
@@ -146,6 +156,7 @@ export class Game {
     this.pops = new SpeedPopups(container);
     this.wins = new WinsCounter(container);
     this.winFlight = new WinFlight(container);
+    this.nameplates = new Nameplates(container);
 
     // The left rail. Two tiles for now, laid out so a third can be added
     // without re-spacing the others.
@@ -214,6 +225,8 @@ export class Game {
         // onto the local rider. Sanitising is the SERVER's job; this sends
         // what the portal reported.
         this.network.sendAvatar(look);
+        // A guest's portrait IS a render of their avatar, so it moves with it.
+        this.syncIdentity();
 
         const apply = (): void => this.dresser?.setLook(look.appearance, look.proportions);
         // The avatar can arrive before the bundled model has finished loading.
@@ -246,7 +259,10 @@ export class Game {
     window.addEventListener('mousedown', this.onGesture);
     window.addEventListener('touchstart', this.onGesture, { passive: true });
 
-    this.renderer.onResize((width, height) => this.camera.setViewport(width, height));
+    this.renderer.onResize((width, height) => {
+      this.camera.setViewport(width, height);
+      this.nameplates.setViewport(width, height);
+    });
 
     this.network = new NetworkClient({
       onStatusChange: (status) => this.onStatusChange(status),
@@ -283,6 +299,12 @@ export class Game {
     this.network.setLookProvider(() =>
       lookFromLegion(this.bloxity.getEquipped(), this.bloxity.getProportions()),
     );
+    // The public half of the identity - a name and a portrait - asked for at
+    // JOIN time for the same reason the look is.
+    this.network.setProfileProvider(() => identityFromLegion(this.bloxity.getUser()));
+    // A login or a logout mid-session re-labels the player for everyone. The
+    // server re-derives the fallback handle on a sign-out.
+    this.bloxity.onUserChanged(() => this.syncIdentity());
 
     this.run = new RunController(this.world.collision, {
       claimStage: (index) => {
@@ -521,6 +543,8 @@ export class Game {
     this.camera.update(delta, player?.horizontalSpeed ?? 0);
 
     this.renderer.renderer.render(this.sceneManager.scene, this.camera.camera);
+    // After the render, from the matrices it just computed - see Nameplates.
+    this.updateNameplates();
   }
 
   /**
@@ -562,17 +586,43 @@ export class Game {
     this.camera.snapTo(player.position, placement === 'respawn');
   }
 
+  /** Send the portal identity if it differs from what was last sent. */
+  private syncIdentity(): void {
+    const identity = identityFromLegion(this.bloxity.getUser());
+    const key = `${identity.name}
+${identity.pfp}`;
+    if (key === this.lastIdentity) return;
+    this.lastIdentity = key;
+    this.network.sendIdentity(identity);
+  }
+
+  /** Every rider's plate, local included, from replicated names only. */
+  private updateNameplates(): void {
+    const plates = this.nameplates;
+    plates.begin(this.camera.camera);
+    const player = this.localPlayer;
+    if (player && this.localName) {
+      plates.put('local', player.mount, this.localName, this.localPfp);
+    }
+    for (const [sessionId, remote] of this.remotePlayers.entries()) {
+      if (remote.displayName) plates.put(sessionId, remote.mount, remote.displayName, remote.pfp);
+    }
+    plates.end();
+  }
+
   private onPlayerAdded(sessionId: string, state: NetPlayerState): void {
     if (sessionId === this.localSessionId) {
       this.applyLocalState(state);
       return;
     }
     this.remotePlayers.add(sessionId, state);
-    // The portal draws the "your friend just joined" toast; it only needs to
-    // be told who. The session id is all this game has for a stranger, which
-    // is exactly what it is - a handle, not a name it invented.
-    this.bloxity.playerJoined(sessionId);
-    this.bloxity.playerInRoom(sessionId);
+    // The portal draws the "your friend just joined" toast, matching the name
+    // it is handed against the friends list - so it needs the player's Bloxity
+    // name, which the room now replicates. A signed-out player's derived handle
+    // simply matches nobody, which is the correct outcome.
+    const name = state.displayName || sessionId;
+    this.bloxity.playerJoined(name);
+    this.bloxity.playerInRoom(name);
   }
 
   private onPlayerChanged(sessionId: string, state: NetPlayerState): void {
@@ -615,6 +665,10 @@ export class Game {
     }
 
     player.setTrailSlot(state.trailSlot);
+    // The server's version, sanitised and with the fallback applied, so the
+    // local plate says exactly what everyone else's screen says.
+    this.localName = state.displayName ?? '';
+    this.localPfp = state.pfp ?? '';
 
     this.hud.update(state.totalSpeed, state.maxLevel, state.rebirths);
     // Only an INCREASE in the replicated total spawns a popup, so the figure
@@ -706,6 +760,7 @@ export class Game {
     this.bloxity.dispose();
     this.bloxityPanel.dispose();
     this.dresser?.dispose();
+    this.nameplates.dispose();
     this.fpsReadout.remove();
     this.audio.dispose();
     this.rebirthButton.dispose();

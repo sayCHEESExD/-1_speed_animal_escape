@@ -600,6 +600,58 @@ body.aoe-touch-mode .aoe-account__name { max-width: 30vw; }
   cursor: not-allowed;
 }
 
+/* ---- Nameplates -----------------------------------------------------------
+ * A small chip over every rider: portrait and name, Roblox-sized.
+ * BELOW every piece of HUD in the stacking order (the popups are 19), so a
+ * crowd of riders can never cover a figure the player needs to read. The
+ * script writes only the transform; everything else lives here.
+ */
+.aoe-plates {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 18;
+}
+.aoe-plate {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px 2px 2px;
+  border-radius: 999px;
+  background: rgba(14, 20, 32, 0.6);
+  /* Scaled toward the head it hangs over, not away from it. */
+  transform-origin: 50% 100%;
+  white-space: nowrap;
+  will-change: transform;
+}
+.aoe-plate[hidden] { display: none; }
+.aoe-plate--bare { padding: 3px 10px; }
+.aoe-plate__pfp {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: rgba(255, 255, 255, 0.16);
+  flex: none;
+}
+.aoe-plate__pfp[hidden] { display: none; }
+.aoe-plate__name {
+  font-family: system-ui, "Segoe UI", Roboto, sans-serif;
+  font-weight: 700;
+  font-size: 13px;
+  line-height: 1.25;
+  color: #ffffff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+body.aoe-touch-mode .aoe-plate__name { font-size: 12px; }
+
 /* ---- Speed-gain popups -------------------------------------------------- */
 /*
  * Deliberately BELOW the HUD in the stacking order (the bar is 20, the rail 21,
@@ -687,6 +739,64 @@ body.aoe-touch-mode .aoe-rail { --aoe-rail: 62px; }
 @media (max-width: 760px) {
   .aoe-pop__icon { height: clamp(30px, 6vw, 44px); }
   .aoe-pop__value { font-size: clamp(14px, 3vw, 22px); }
+}
+
+/* ---- A phone on its side ---------------------------------------------------
+ * Short landscape is the one shape the rules above were not drawn for. The
+ * rail is centred vertically, which on a 360px-tall screen parks the Sound tile
+ * on top of the movement stick, and panels sized in vh ran off the bottom.
+ * Everything here is scoped to that shape, so the desktop and portrait layouts
+ * are exactly what they were. The notch is on a SIDE in landscape, which is why
+ * the safe-area insets finally matter here.
+ */
+@media (orientation: landscape) and (max-height: 500px) {
+  .aoe-wins { top: max(6px, env(safe-area-inset-top, 0px)); }
+  .aoe-account {
+    top: max(6px, env(safe-area-inset-top, 0px));
+    right: max(8px, env(safe-area-inset-right, 0px));
+  }
+
+  .aoe-panel {
+    padding:
+      max(6px, env(safe-area-inset-top, 0px))
+      max(8px, env(safe-area-inset-right, 0px))
+      max(6px, env(safe-area-inset-bottom, 0px))
+      max(8px, env(safe-area-inset-left, 0px));
+  }
+  .aoe-panel__box {
+    width: min(560px, 86vw);
+    max-height: calc(100vh - 12px);
+    max-height: calc(100dvh - 12px);
+    border-width: 4px;
+    border-radius: 16px;
+  }
+  .aoe-panel__head { padding: 6px 12px; font-size: 17px; }
+  .aoe-panel__close { width: 28px; height: 28px; font-size: 14px; border-radius: 9px; }
+  .aoe-panel__body { padding: 10px 12px 12px; }
+
+  /* The rail climbs into the top-left corner and sizes itself by HEIGHT, so it
+   * ends well above the stick however short the screen is. */
+  body.aoe-touch-mode .aoe-rail {
+    --aoe-rail: clamp(40px, 12.5vh, 58px);
+    top: max(8px, env(safe-area-inset-top, 0px));
+    left: max(10px, env(safe-area-inset-left, 0px));
+    transform: none;
+    gap: clamp(9px, 3.4vh, 14px);
+  }
+  body.aoe-touch-mode .aoe-tile { border-width: 3px; border-radius: 13px; }
+  body.aoe-touch-mode .aoe-tile__label { font-size: 10px; bottom: -7px; }
+  body.aoe-touch-mode .aoe-tile__badge {
+    width: 18px;
+    height: 18px;
+    right: -6px;
+    bottom: -6px;
+    border-width: 2px;
+    font-size: 11px;
+    line-height: 14px;
+  }
+  body.aoe-touch-mode .aoe-account__name { max-width: 22vw; }
+  /* The FPS readout shared the rail's corner; it moves beside the column. */
+  body.aoe-touch-mode .aoe-fps { left: calc(max(10px, env(safe-area-inset-left, 0px)) + 72px); }
 }
 `;
   document.head.appendChild(style);

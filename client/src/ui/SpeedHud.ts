@@ -243,6 +243,34 @@ body.aoe-touch-mode .aoe-hud {
   width: min(560px, 62vw);
 }
 
+/*
+ * A phone on its side is SHORT: lifting the bar 96px clear of the thumbs put it
+ * across the middle of the screen, right over the rider. In landscape the stick
+ * and the jump button sit side by side rather than stacked above the bar, so it
+ * drops back to the bottom edge and narrows to the gap BETWEEN them - measured
+ * from the same vmin the stick is sized by, so the two cannot drift apart.
+ */
+@media (orientation: landscape) and (max-height: 500px) {
+  body.aoe-touch-mode .aoe-hud {
+    bottom: max(6px, env(safe-area-inset-bottom, 0px));
+    width: max(
+      220px,
+      min(
+        440px,
+        calc(100vw - 2 * (44px + 30vmin) - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px))
+      )
+    );
+  }
+  body.aoe-touch-mode .aoe-hud__speed-row { margin-bottom: 3px; gap: 6px; }
+  body.aoe-touch-mode .aoe-hud__speed { font-size: clamp(17px, 6.4vh, 28px); }
+  body.aoe-touch-mode .aoe-hud__multi { font-size: clamp(9px, 3vh, 13px); }
+  body.aoe-touch-mode .aoe-hud__bar { height: clamp(22px, 8.5vh, 34px); border-width: 3px; }
+  body.aoe-touch-mode .aoe-hud__level,
+  body.aoe-touch-mode .aoe-hud__amount { font-size: clamp(11px, 4vh, 16px); }
+  body.aoe-touch-mode .aoe-hud__level { left: 12px; }
+  body.aoe-touch-mode .aoe-hud__amount { right: 12px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .aoe-hud__fill { transition: none; }
   .aoe-hud--levelup .aoe-hud__bar { animation: none; }

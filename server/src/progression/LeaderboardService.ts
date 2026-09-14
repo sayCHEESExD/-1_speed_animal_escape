@@ -54,31 +54,37 @@ export class LeaderboardService {
     live: Iterable<[string, PlayerState]>,
     playerIds: ReadonlyMap<string, string>,
   ): void {
-    const byHandle = new Map<string, Candidate>();
+    // Keyed by PLAYER ID, never by the name shown. Names are now the player's
+    // own choice, so two riders can both be called "chicken456" - and a map
+    // keyed by the label would silently merge them into one row.
+    const byId = new Map<string, Candidate>();
 
     for (const [id, profile] of profileStore.entries()) {
-      byHandle.set(handleFor(id), {
-        handle: handleFor(id),
+      byId.set(id, {
+        // The Bloxity name they last played under, or the derived handle for
+        // somebody who never signed in.
+        handle: profile.displayName || handleFor(id),
         wins: profile.wins,
         speed: profile.totalSpeed,
         rebirths: profile.rebirths,
       });
     }
 
-    // Live state last, so it overwrites the stored copy of the same player.
+    // Live state last, so it overwrites the stored copy of the same player -
+    // including their name, which is what makes a login show up on the board
+    // at the next rebuild rather than at the next autosave.
     for (const [sessionId, player] of live) {
       const id = playerIds.get(sessionId);
       if (!id) continue;
-      const handle = handleFor(id);
-      byHandle.set(handle, {
-        handle,
+      byId.set(id, {
+        handle: player.displayName || handleFor(id),
         wins: player.wins,
         speed: player.totalSpeed,
         rebirths: player.rebirths,
       });
     }
 
-    const all = [...byHandle.values()];
+    const all = [...byId.values()];
     fill(board.wins, all, (c) => c.wins);
     fill(board.speed, all, (c) => c.speed);
     fill(board.rebirths, all, (c) => c.rebirths);

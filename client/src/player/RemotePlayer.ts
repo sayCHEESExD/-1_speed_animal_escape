@@ -51,6 +51,10 @@ export class RemotePlayer {
 
   private placed = false;
 
+  /** The replicated name and portrait, read by the nameplates. Cosmetic only. */
+  displayName = '';
+  pfp = '';
+
   /**
    * This player's Bloxity appearance, built from replicated ids.
    *
@@ -98,6 +102,8 @@ export class RemotePlayer {
     this.mount.setAnimalSlot(state.animalSlot);
     this.mount.setTrailSlot(state.trailSlot);
     this.dressFrom(state);
+    this.displayName = state.displayName ?? '';
+    this.pfp = state.pfp ?? '';
 
     if (this.lastDeathCount >= 0 && state.deathCount > this.lastDeathCount) {
       this.deathTime = 0;
